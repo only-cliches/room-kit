@@ -8,16 +8,16 @@ import type {
 	StreamChannelDef,
 } from "./channel";
 
-type ChannelSpecVariants = {
+type ChannelSpecEnumTypes = {
 	Event: { name: string };
 	Request: { name: string };
 	Stream: { name: string };
 	Room: { name: string };
 }
 
-const ChannelSpec: IronEnumFactory<ChannelSpecVariants> = IronEnum<ChannelSpecVariants>({ keys: ["Event", "Request", "Stream", "Room"] });
+const ChannelSpec: IronEnumFactory<ChannelSpecEnumTypes> = IronEnum<ChannelSpecEnumTypes>({ keys: ["Event", "Request", "Stream", "Room"] });
 
-type WireFrameVariants = {
+type WireFrameEnumTypes = {
 	Event: { channel: string; payload: unknown };
 	Request: { id: string; channel: string; payload: unknown };
 	Response: { id: string; payload: unknown };
@@ -29,7 +29,7 @@ type WireFrameVariants = {
 	RoomLeave: { id: string; channel: string; payload: unknown };
 };
 
-const WireFrame: IronEnumFactory<WireFrameVariants> = IronEnum<WireFrameVariants>({
+const WireFrame: IronEnumFactory<WireFrameEnumTypes> = IronEnum<WireFrameEnumTypes>({
 	keys: [
 		"Event",
 		"Request",
@@ -54,13 +54,15 @@ export const RequestFailure: IronEnumFactory<RequestFailureVariants> = IronEnum<
 export type RequestFailureVariant = typeof RequestFailure._.typeOf;
 export type SafeCallResult<T> = ResultVariant<{ Ok: T; Err: RequestFailureVariant }>;
 
-export const SubscriptionState = IronEnum<{
+type SubscriptionStateEnumTypes = {
 	Idle: undefined;
 	Starting: { id: string };
 	Active: { id: string; channel: string };
 	Stopped: { id: string; channel: string };
 	Failed: { id: string; error: unknown };
-}>({ keys: ["Idle", "Starting", "Active", "Stopped", "Failed"] });
+}
+
+export const SubscriptionState: IronEnumFactory<SubscriptionStateEnumTypes> = IronEnum<SubscriptionStateEnumTypes>({ keys: ["Idle", "Starting", "Active", "Stopped", "Failed"] });
 
 export type SubscriptionStateVariant = typeof SubscriptionState._.typeOf;
 
