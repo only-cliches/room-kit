@@ -1,5 +1,5 @@
 {
-  "name": "channel-io",
+  "name": "channel-kit",
   "version": "1.0.0",
   "description": "Type-safe channel abstractions for Socket.IO events, requests, streams, and room membership.",
   "main": "dist/index.js",
@@ -10,7 +10,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/only-cliches/channel-io.git"
+    "url": "git+https://github.com/only-cliches/channel-kit.git"
   },
   "keywords": [
     "socket.io",
@@ -26,9 +26,9 @@
   "author": "Scott Lott <me@scottlott.com>",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/only-cliches/channel-io/issues"
+    "url": "https://github.com/only-cliches/channel-kit/issues"
   },
-  "homepage": "https://github.com/only-cliches/channel-io#readme",
+  "homepage": "https://github.com/only-cliches/channel-kit#readme",
   "dependencies": {
     "iron-enum": "^1.8.0",
     "socket.io": "^4.8.3"

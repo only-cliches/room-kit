@@ -1,8 +1,8 @@
-# channel-io
+# channel-kit
 
-[![GitHub Repo stars](https://img.shields.io/github/stars/only-cliches/channel-io)](https://github.com/only-cliches/channel-io)
-[![NPM Version](https://img.shields.io/npm/v/channel-io)](https://www.npmjs.com/package/channel-io)
-[![JSR Version](https://img.shields.io/jsr/v/%40onlycliches/channel-io)](https://jsr.io/@onlycliches/channel-io)
+[![GitHub Repo stars](https://img.shields.io/github/stars/only-cliches/channel-kit)](https://github.com/only-cliches/channel-kit)
+[![NPM Version](https://img.shields.io/npm/v/channel-kit)](https://www.npmjs.com/package/channel-kit)
+[![JSR Version](https://img.shields.io/jsr/v/%40onlycliches/channel-kit)](https://jsr.io/@onlycliches/channel-kit)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue.svg)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -11,21 +11,21 @@ Type-safe channel primitives for Socket.IO events, requests, streams, and room m
 ## Install
 
 ```bash
-npm install channel-io socket.io socket.io-client
+npm install channel-kit socket.io socket.io-client
 ```
 
 ## Import Matrix
 
 - npm:
-  - `import { channel, createSocketChannels, adaptSocketIoTransport } from "channel-io";`
+  - `import { channel, createSocketChannels, adaptSocketIoTransport } from "channel-kit";`
 - JSR:
-  - `import { channel, createSocketChannels, adaptSocketIoTransport } from "jsr:@only-cliches/channel-io@1";`
+  - `import { channel, createSocketChannels, adaptSocketIoTransport } from "jsr:@only-cliches/channel-kit@1";`
 
 ## Quick Start
 
 ```ts
 // common.ts
-import { channel } from "channel-io";
+import { channel } from "channel-kit";
 
 export const typing = channel("chat.typing").event<{ roomId: string; userId: string }>();
 export const sendMessage = channel("chat.sendMessage")
@@ -38,7 +38,7 @@ export const roomMembership = channel("chat.roomMembership").room<{ roomId: stri
 // server.ts
 import http from "node:http";
 import { Server } from "socket.io";
-import { adaptSocketIoTransport, createSocketChannels } from "channel-io";
+import { adaptSocketIoTransport, createSocketChannels } from "channel-kit";
 import { sendMessage, roomMembership, typing } from "./common";
 
 const httpServer = http.createServer();
@@ -66,7 +66,7 @@ httpServer.listen(3000);
 ```ts
 // client.ts
 import { io } from "socket.io-client";
-import { adaptSocketIoTransport, createSocketChannels } from "channel-io";
+import { adaptSocketIoTransport, createSocketChannels } from "channel-kit";
 import { roomMembership, sendMessage, typing } from "./common";
 
 const socket = io("http://127.0.0.1:3000");
