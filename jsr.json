@@ -1,5 +1,5 @@
 {
-  "name": "@only-cliches/channel-kit",
+  "name": "@onlycliches/channel-kit",
   "version": "1.0.0",
   "exports": "./src/index.ts",
   "publish": {
