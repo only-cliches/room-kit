@@ -1,0 +1,41 @@
+{
+  "name": "channel-io",
+  "version": "1.0.0",
+  "description": "Type-safe channel abstractions for Socket.IO events, requests, streams, and room membership.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/only-cliches/channel-io.git"
+  },
+  "keywords": [
+    "socket.io",
+    "channels",
+    "typescript",
+    "realtime",
+    "events",
+    "requests",
+    "streams",
+    "rooms",
+    "pubsub"
+  ],
+  "author": "Scott Lott <me@scottlott.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/only-cliches/channel-io/issues"
+  },
+  "homepage": "https://github.com/only-cliches/channel-io#readme",
+  "dependencies": {
+    "iron-enum": "^1.8.0",
+    "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.3",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.1"
+  }
+}
