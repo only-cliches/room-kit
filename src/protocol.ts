@@ -1,4 +1,4 @@
-import { IronEnum, type ResultVariant, Err, Ok } from "iron-enum";
+import { IronEnum, type ResultVariant, Err, Ok, IronEnumFactory } from "iron-enum";
 
 import type {
 	AnyChannelDef,
@@ -8,14 +8,16 @@ import type {
 	StreamChannelDef,
 } from "./channel";
 
-const ChannelSpec = IronEnum<{
+type ChannelSpecVariants = {
 	Event: { name: string };
 	Request: { name: string };
 	Stream: { name: string };
 	Room: { name: string };
-}>({ keys: ["Event", "Request", "Stream", "Room"] });
+}
 
-const WireFrame = IronEnum<{
+const ChannelSpec: IronEnumFactory<ChannelSpecVariants> = IronEnum<ChannelSpecVariants>({ keys: ["Event", "Request", "Stream", "Room"] });
+
+type WireFrameVariants = {
 	Event: { channel: string; payload: unknown };
 	Request: { id: string; channel: string; payload: unknown };
 	Response: { id: string; payload: unknown };
@@ -25,7 +27,9 @@ const WireFrame = IronEnum<{
 	Publish: { channel: string; payload: unknown };
 	RoomJoin: { id: string; channel: string; payload: unknown };
 	RoomLeave: { id: string; channel: string; payload: unknown };
-}>({
+};
+
+const WireFrame: IronEnumFactory<WireFrameVariants> = IronEnum<WireFrameVariants>({
 	keys: [
 		"Event",
 		"Request",
@@ -39,11 +43,13 @@ const WireFrame = IronEnum<{
 	],
 });
 
-export const RequestFailure = IronEnum<{
+type RequestFailureVariants = {
 	Timeout: { ms: number };
 	InvalidResponse: { reason: string };
 	Rejected: { error: unknown };
-}>({ keys: ["Timeout", "InvalidResponse", "Rejected"] });
+};
+
+export const RequestFailure: IronEnumFactory<RequestFailureVariants> = IronEnum<RequestFailureVariants>({ keys: ["Timeout", "InvalidResponse", "Rejected"] });
 
 export type RequestFailureVariant = typeof RequestFailure._.typeOf;
 export type SafeCallResult<T> = ResultVariant<{ Ok: T; Err: RequestFailureVariant }>;
