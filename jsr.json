@@ -1,6 +1,6 @@
 {
   "name": "@onlycliches/room-kit",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Type-safe channel primitives for Socket.IO events, requests, streams, and room membership.",
   "exports": "./src/index.ts",
   "publish": {
