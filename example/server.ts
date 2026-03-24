@@ -2,7 +2,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual as cryptoTimingSafeEqual } from "node:crypto";
 
 import { Server } from "socket.io";
 
@@ -16,7 +16,7 @@ type ChatAuth = {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const port = Number(process.env.PORT || 3000);
-const publicDir = path.join(__dirname, "public");
+const publicDir = path.resolve(path.join(__dirname, "public"));
 
 function normalizeRoomId(value: unknown): string {
   if (typeof value !== "string" || !value.trim()) {
@@ -69,14 +69,21 @@ function normalizeMessageText(value: unknown): string {
 }
 
 function serveFile(filePath: string, res: http.ServerResponse): void {
-  fs.readFile(filePath, (error, contents) => {
+  const resolved = path.resolve(filePath);
+  if (!resolved.startsWith(publicDir + path.sep) && resolved !== publicDir) {
+    res.statusCode = 403;
+    res.end("Forbidden");
+    return;
+  }
+
+  fs.readFile(resolved, (error, contents) => {
     if (error) {
       res.statusCode = 404;
       res.end("Not found");
       return;
     }
 
-    const ext = path.extname(filePath);
+    const ext = path.extname(resolved);
     const contentType =
       ext === ".html"
         ? "text/html; charset=utf-8"
@@ -94,21 +101,19 @@ function serveFile(filePath: string, res: http.ServerResponse): void {
   });
 }
 
+const STATIC_ROUTES: Record<string, string> = {
+  "/": "index.html",
+  "/index.html": "index.html",
+  "/styles.css": "styles.css",
+  "/app.js": "app.js",
+};
+
 const server = http.createServer((req, res) => {
   const requestUrl = new URL(req.url || "/", "http://127.0.0.1");
+  const staticFile = STATIC_ROUTES[requestUrl.pathname];
 
-  if (requestUrl.pathname === "/" || requestUrl.pathname === "/index.html") {
-    serveFile(path.join(publicDir, "index.html"), res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/styles.css") {
-    serveFile(path.join(publicDir, "styles.css"), res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/app.js") {
-    serveFile(path.join(publicDir, "app.js"), res);
+  if (staticFile) {
+    serveFile(path.join(publicDir, staticFile), res);
     return;
   }
 
@@ -138,7 +143,7 @@ io.on("connection", (socket) => {
       const userId = normalizeUserId(ctx.auth.userId);
       const userName = normalizeDisplayName(join.userName);
 
-      if (ctx.serverState.roomKey !== roomKey) {
+      if (!timingSafeEqual(ctx.serverState.roomKey, roomKey)) {
         throw new ClientSafeError("That room key is incorrect.");
       }
 
@@ -194,6 +199,20 @@ io.on("connection", (socket) => {
     },
   });
 });
+
+
+// Uses crypto.timingSafeEqual to prevent timing side-channel attacks on
+// secret comparisons like room keys.
+function timingSafeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, "utf-8");
+  const bufB = Buffer.from(b, "utf-8");
+  if (bufA.length !== bufB.length) {
+    // Compare against self to burn equal time, then return false
+    cryptoTimingSafeEqual(bufA, bufA);
+    return false;
+  }
+  return cryptoTimingSafeEqual(bufA, bufB);
+}
 
 server.listen(port, "127.0.0.1", () => {
   console.log(`Chat example listening on http://127.0.0.1:${port}`);

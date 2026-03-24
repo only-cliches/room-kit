@@ -31,6 +31,132 @@ const SERVER_EVENT = "room-kit:server-event";
 const PRESENCE_EVENT = "room-kit:presence";
 const PRESENCE_QUERY_EVENT = "room-kit:presence-query";
 
+function assertNonEmptyString(value: unknown, label: string): asserts value is string {
+    if (typeof value !== "string" || value.length === 0) {
+        throw new ClientSafeError(`${label} must be a non-empty string`);
+    }
+}
+
+function assertObject(value: unknown, label: string): asserts value is Record<string, unknown> {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new ClientSafeError(`${label} must be an object`);
+    }
+}
+
+function assertArray(value: unknown, label: string): asserts value is unknown[] {
+    if (!Array.isArray(value)) {
+        throw new ClientSafeError(`${label} must be an array`);
+    }
+}
+
+/** Validates and narrows a join frame from the wire. */
+function validateJoinFrame(raw: unknown): {
+    roomType: string;
+    payload: Record<string, unknown>;
+} {
+    assertObject(raw, "Join frame");
+    assertNonEmptyString(raw.roomType, "roomType");
+    assertObject(raw.payload, "payload");
+    return { roomType: raw.roomType, payload: raw.payload as Record<string, unknown> };
+}
+
+/** Validates and narrows a leave frame from the wire. */
+function validateLeaveFrame(raw: unknown): { roomType: string; roomId: string } {
+    assertObject(raw, "Leave frame");
+    assertNonEmptyString(raw.roomType, "roomType");
+    assertNonEmptyString(raw.roomId, "roomId");
+    return { roomType: raw.roomType, roomId: raw.roomId };
+}
+
+/** Validates and narrows an RPC frame from the wire. */
+function validateRpcFrame(raw: unknown): {
+    roomType: string;
+    roomId: string;
+    name: string;
+    args: unknown[];
+} {
+    assertObject(raw, "RPC frame");
+    assertNonEmptyString(raw.roomType, "roomType");
+    assertNonEmptyString(raw.roomId, "roomId");
+    assertNonEmptyString(raw.name, "name");
+    assertArray(raw.args, "args");
+    return { roomType: raw.roomType, roomId: raw.roomId, name: raw.name, args: raw.args };
+}
+
+/** Validates and narrows a client-event frame from the wire. */
+function validateClientEventFrame(raw: unknown): {
+    roomType: string;
+    roomId: string;
+    name: string;
+    payload: unknown;
+} {
+    assertObject(raw, "Client-event frame");
+    assertNonEmptyString(raw.roomType, "roomType");
+    assertNonEmptyString(raw.roomId, "roomId");
+    assertNonEmptyString(raw.name, "name");
+    return { roomType: raw.roomType, roomId: raw.roomId, name: raw.name, payload: raw.payload };
+}
+
+/** Validates and narrows a presence-query frame from the wire. */
+function validatePresenceQueryFrame(raw: unknown): {
+    roomType: string;
+    roomId: string;
+    kind: "count" | "list";
+    offset?: number;
+    limit?: number;
+} {
+    assertObject(raw, "Presence-query frame");
+    assertNonEmptyString(raw.roomType, "roomType");
+    assertNonEmptyString(raw.roomId, "roomId");
+    if (raw.kind !== "count" && raw.kind !== "list") {
+        throw new ClientSafeError("Presence query kind must be 'count' or 'list'");
+    }
+    const result: {
+        roomType: string;
+        roomId: string;
+        kind: "count" | "list";
+        offset?: number;
+        limit?: number;
+    } = { roomType: raw.roomType, roomId: raw.roomId, kind: raw.kind };
+    if (raw.offset !== undefined) {
+        if (typeof raw.offset !== "number" || !Number.isFinite(raw.offset)) {
+            throw new ClientSafeError("offset must be a finite number");
+        }
+        result.offset = raw.offset;
+    }
+    if (raw.limit !== undefined) {
+        if (typeof raw.limit !== "number" || !Number.isFinite(raw.limit)) {
+            throw new ClientSafeError("limit must be a finite number");
+        }
+        result.limit = raw.limit;
+    }
+    return result;
+}
+
+const DANGEROUS_PROPERTY_NAMES = new Set([
+    "__proto__",
+    "constructor",
+    "prototype",
+    "toString",
+    "valueOf",
+    "hasOwnProperty",
+    "isPrototypeOf",
+    "propertyIsEnumerable",
+    "toLocaleString",
+]);
+
+function assertSafeHandlerName(name: string): void {
+    if (DANGEROUS_PROPERTY_NAMES.has(name)) {
+        throw new ClientSafeError(`Disallowed handler name '${name}'`);
+    }
+}
+
+/** Maximum number of rooms that can exist within a single namespace. */
+const MAX_ROOMS_PER_NAMESPACE = 10_000;
+
+/** Maximum number of socket connections tracked per room. */
+const MAX_MEMBERS_PER_ROOM = 10_000;
+
 type StoredMember<TRoom extends RoomDefinition<any>> = {
     socketId: string;
     memberId: string;
@@ -90,19 +216,26 @@ export function serveRoomType<TRoom extends RoomDefinition<any>, TAuth = unknown
     const authCache = new WeakMap<ServerSocketLike, AuthCacheEntry<TAuth>>();
 
     const onJoin = async (
-        frame: {
-            roomType: string;
-            payload: JoinRequest<TRoom>;
-        },
+        raw: unknown,
         ack?: (result: { ok: true; value: { roomId: string; memberId: string; roomProfile: any; presence: PresenceValueFor<TRoom> } } | { ok: false; error: string }) => void,
     ) => {
         try {
+
+            if (ack !== undefined && typeof ack !== "function") {
+                return;
+            }
+            const frame = validateJoinFrame(raw);
             assertMatchingRoomName(_room, frame.roomType);
             const requestedRoomId = extractRoomId(frame.payload);
             const roomCollection = getOrCreateRoomCollection(namespaceState, frame.roomType);
+
+            if (!roomCollection.has(requestedRoomId) && roomCollection.size >= MAX_ROOMS_PER_NAMESPACE) {
+                throw new ClientSafeError("Maximum room limit reached for this namespace");
+            }
+
             const existingRoomState = roomCollection.get(requestedRoomId);
             const initialState = (existingRoomState?.serverState ??
-                await Promise.resolve(handlers.initState?.(frame.payload) ?? {})) as ServerStateFor<TRoom>;
+                await Promise.resolve(handlers.initState?.(frame.payload as JoinRequest<TRoom>) ?? {})) as ServerStateFor<TRoom>;
             const auth = await resolveSocketAuth(socket, handlers, authCache, true);
             const provisional = createContext<TRoom, TAuth>(socket, namespaceState, {
                 adapter,
@@ -114,7 +247,7 @@ export function serveRoomType<TRoom extends RoomDefinition<any>, TAuth = unknown
                 roomProfile: undefined,
                 serverState: initialState,
             });
-            const admission = await handlers.admit(frame.payload, provisional);
+            const admission = await handlers.admit(frame.payload as JoinRequest<TRoom>, provisional);
             assertMatchingRoomIds(
                 requestedRoomId,
                 admission.roomId,
@@ -128,6 +261,11 @@ export function serveRoomType<TRoom extends RoomDefinition<any>, TAuth = unknown
                 membersBySocketId: new Map(),
                 socketIdsByMemberId: new Map(),
             };
+
+            if (!roomState.membersBySocketId.has(socket.id) && roomState.membersBySocketId.size >= MAX_MEMBERS_PER_ROOM) {
+                throw new ClientSafeError("Room is full");
+            }
+
             roomState.roomProfile = roomState.roomProfile ?? admission.roomProfile;
             roomState.serverState = roomState.serverState ?? provisional.serverState;
             roomState.membersBySocketId.set(socket.id, {
@@ -168,10 +306,14 @@ export function serveRoomType<TRoom extends RoomDefinition<any>, TAuth = unknown
     };
 
     const onLeave = async (
-        payload: { roomType: string; roomId: string },
+        raw: unknown,
         ack?: (result: { ok: true; value: void } | { ok: false; error: string }) => void,
     ) => {
         try {
+            if (ack !== undefined && typeof ack !== "function") {
+                return;
+            }
+            const payload = validateLeaveFrame(raw);
             assertMatchingRoomName(_room, payload.roomType);
             const stored = getStoredMembership(namespaceState, payload.roomType, payload.roomId, socket.id);
             if (!stored) {
@@ -202,11 +344,16 @@ export function serveRoomType<TRoom extends RoomDefinition<any>, TAuth = unknown
     };
 
     const onRpc = async (
-        frame: { roomType: string; roomId: string; name: string; args: unknown[] },
+        raw: unknown,
         ack?: (result: { ok: true; value: unknown } | { ok: false; error: string }) => void,
     ) => {
         try {
+            if (ack !== undefined && typeof ack !== "function") {
+                return;
+            }
+            const frame = validateRpcFrame(raw);
             assertMatchingRoomName(_room, frame.roomType);
+            assertSafeHandlerName(frame.name);
             if (!handlers.rpc || !Object.hasOwn(handlers.rpc, frame.name)) {
                 throw new ClientSafeError(`Unknown RPC '${frame.name}'`);
             }
@@ -232,6 +379,9 @@ export function serveRoomType<TRoom extends RoomDefinition<any>, TAuth = unknown
                 serverState: getRoomState(namespaceState, frame.roomType, frame.roomId).serverState as ServerStateFor<TRoom>,
             });
 
+            if (frame.args.length > 64) {
+                throw new ClientSafeError("Too many RPC arguments");
+            }
             const result = await handler(...frame.args, ctx);
             ack?.({ ok: true, value: result });
         } catch (error) {
@@ -240,11 +390,16 @@ export function serveRoomType<TRoom extends RoomDefinition<any>, TAuth = unknown
     };
 
     const onClientEvent = async (
-        frame: { roomType: string; roomId: string; name: string; payload: unknown },
+        raw: unknown,
         ack?: (result: { ok: true; value: void } | { ok: false; error: string }) => void,
     ) => {
         try {
+            if (ack !== undefined && typeof ack !== "function") {
+                return;
+            }
+            const frame = validateClientEventFrame(raw);
             assertMatchingRoomName(_room, frame.roomType);
+            assertSafeHandlerName(frame.name);
             const stored = getStoredMembership(namespaceState, frame.roomType, frame.roomId, socket.id);
             if (!stored) {
                 throw new ClientSafeError("Socket is not joined to that room");
@@ -284,16 +439,14 @@ export function serveRoomType<TRoom extends RoomDefinition<any>, TAuth = unknown
     };
 
     const onPresenceQuery = async (
-        frame: {
-            roomType: string;
-            roomId: string;
-            kind: "count" | "list";
-            offset?: number;
-            limit?: number;
-        },
+        raw: unknown,
         ack?: (result: { ok: true; value: number | PresencePageFor<TRoom> } | { ok: false; error: string }) => void,
     ) => {
         try {
+            if (ack !== undefined && typeof ack !== "function") {
+                return;
+            }
+            const frame = validatePresenceQueryFrame(raw);
             assertMatchingRoomName(_room, frame.roomType);
             const stored = getStoredMembership(namespaceState, frame.roomType, frame.roomId, socket.id);
             if (!stored) {
@@ -1026,7 +1179,12 @@ function extractRoomId(payload: unknown): string {
         throw new ClientSafeError("Join request must include a string roomId");
     }
 
-    return (payload as { roomId: string }).roomId;
+    const roomId = (payload as { roomId: string }).roomId;
+    if (roomId.length === 0 || roomId.length > 256) {
+        throw new ClientSafeError("roomId must be between 1 and 256 characters");
+    }
+
+    return roomId;
 }
 
 function toErrorMessage(error: unknown): string {

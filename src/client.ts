@@ -26,6 +26,8 @@ const SERVER_EVENT = "room-kit:server-event";
 const PRESENCE_EVENT = "room-kit:presence";
 const PRESENCE_QUERY_EVENT = "room-kit:presence-query";
 
+const DEFAULT_ACK_TIMEOUT_MS = 30_000;
+
 type ClientRegistry = {
     serverHandlerInstalled: boolean;
     presenceHandlerInstalled: boolean;
@@ -268,6 +270,19 @@ function installClientHandlers(socket: ClientSocketLike, registry: ClientRegistr
                 source: unknown;
             };
         }) => {
+            if (
+                !frame ||
+                typeof frame !== "object" ||
+                typeof frame.roomType !== "string" ||
+                typeof frame.roomId !== "string" ||
+                typeof frame.name !== "string" ||
+                !frame.meta ||
+                typeof frame.meta !== "object" ||
+                typeof frame.meta.sentAt !== "string"
+            ) {
+                return;
+            }
+
             const state = registry.joinedRooms.get(makeJoinedRoomKey(frame.roomType, frame.roomId));
             if (!state) {
                 return;
@@ -284,7 +299,11 @@ function installClientHandlers(socket: ClientSocketLike, registry: ClientRegistr
             } as EventMetaFor<any>;
 
             for (const handler of handlers) {
-                handler(frame.payload, meta);
+                try {
+                    handler(frame.payload, meta);
+                } catch {
+                    // Swallow per-listener errors to avoid breaking the event loop
+                }
             }
         };
 
@@ -294,6 +313,15 @@ function installClientHandlers(socket: ClientSocketLike, registry: ClientRegistr
 
     if (!registry.presenceHandlerInstalled) {
         const onPresence = (frame: { roomType: string; roomId: string; presence: unknown }) => {
+            if (
+                !frame ||
+                typeof frame !== "object" ||
+                typeof frame.roomType !== "string" ||
+                typeof frame.roomId !== "string"
+            ) {
+                return;
+            }
+
             const state = registry.joinedRooms.get(makeJoinedRoomKey(frame.roomType, frame.roomId));
             if (!state) {
                 return;
@@ -305,7 +333,11 @@ function installClientHandlers(socket: ClientSocketLike, registry: ClientRegistr
             }
 
             for (const handler of state.presenceListeners) {
-                handler(state.presenceCurrent);
+                try {
+                    handler(state.presenceCurrent);
+                } catch {
+                    // Swallow per-listener errors
+                }
             }
         };
 
@@ -405,7 +437,13 @@ function makeJoinedRoomKey(name: string, roomId: string): string {
 
 function emitAck<TValue>(socket: ClientSocketLike, eventName: string, payload: unknown): Promise<TValue> {
     return new Promise<TValue>((resolve, reject) => {
+        const timer = setTimeout(() => {
+            reject(new Error(`Acknowledgement timeout for '${eventName}'`));
+        }, DEFAULT_ACK_TIMEOUT_MS);
+
         socket.emit(eventName, payload, (result: { ok: true; value: TValue } | { ok: false; error: string }) => {
+            clearTimeout(timer);
+
             if (!result || typeof result !== "object") {
                 reject(new Error("Invalid acknowledgement payload"));
                 return;
@@ -428,6 +466,10 @@ function setConnectionState(registry: ClientRegistry, next: ClientConnectionStat
 
     registry.connectionState = next;
     for (const listener of registry.connectionListeners) {
-        listener(next);
+        try {
+            listener(next);
+        } catch {
+            // Swallow per-listener errors
+        }
     }
 }
