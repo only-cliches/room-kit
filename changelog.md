@@ -2,7 +2,7 @@
 
 ## 1.0.0
 
-- Initial release of `channel-kit`.
+- Initial release of `room-kit`.
 - Typed channel primitives for Socket.IO events, requests, streams, and room membership.
 - Runtime protocol support for event, request/response, stream subscribe/publish, and room join/leave flows.
 - Test coverage for runtime behavior and Socket.IO integration.

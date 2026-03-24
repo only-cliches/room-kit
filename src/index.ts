@@ -1,7 +1,34 @@
-/**
- * Channel-based Socket.IO primitives for events, requests, streams, and room membership.
- */
-export * from "./channel";
-export * from "./protocol";
-export * from "./transport";
-export * from "./runtime";
+export { ClientSafeError } from "./types";
+export { createRoomClient } from "./client";
+export { defineRoomType } from "./room";
+export { serveRoomType } from "./server";
+
+export type {
+    ClientConnectionState,
+    ClientSocketLike,
+    EventMetaFor,
+    JoinRequest,
+    JoinedRoom,
+    MemberProfileFor,
+    PresenceListQuery,
+    PresenceFor,
+    PresencePageFor,
+    PresencePolicy,
+    RoomMemberSnapshot,
+    RoomClient,
+    RoomDefinition,
+    RoomEvents,
+    RoomProfileFor,
+    RoomRpc,
+    RoomSchema,
+    ServerStateFor,
+    RoomServerAdapter,
+    RoomServerBroadcastApi,
+    RoomServerHandle,
+    RoomServerContext,
+    RoomServerHandlers,
+    RoomSnapshot,
+    ServerAdmission,
+    ServerSocketLike,
+    VisibleMemberFor,
+} from "./types";

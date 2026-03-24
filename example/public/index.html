@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Private Room Chat</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Example app</p>
+        <h1>Private room chat with live presence</h1>
+        <p class="lede">
+          Create a room, share the room key with the people you want inside, and watch the member list update in real time.
+        </p>
+      </section>
+
+      <section class="panel" id="join-panel">
+        <h2>Join a room</h2>
+        <form id="join-form" class="form-grid">
+          <label>
+            Display name
+            <input id="name-input" name="name" type="text" maxlength="32" placeholder="Ada" autocomplete="nickname" required />
+          </label>
+          <label>
+            Room id
+            <input id="room-input" name="roomId" type="text" maxlength="64" placeholder="launch-team" autocomplete="off" required />
+          </label>
+          <label>
+            Room key
+            <input id="key-input" name="roomKey" type="password" maxlength="64" placeholder="secret phrase" autocomplete="off" required />
+          </label>
+          <div class="actions">
+            <button type="submit">Enter room</button>
+          </div>
+        </form>
+        <p class="hint">
+          The first person to join a room sets the key. Everyone else needs the same key to enter.
+        </p>
+        <p id="status" class="status">Disconnected.</p>
+      </section>
+
+      <section class="workspace hidden" id="workspace">
+        <div class="panel room-header">
+          <div>
+            <p class="eyebrow">Active room</p>
+            <h2 id="room-title">-</h2>
+            <p id="room-subtitle" class="hint">-</p>
+          </div>
+          <button id="leave-button" class="ghost-button" type="button">Leave room</button>
+        </div>
+
+        <div class="columns">
+          <section class="panel feed-panel">
+            <div class="panel-title-row">
+              <h3>Messages</h3>
+            </div>
+            <div id="messages" class="feed"></div>
+            <form id="message-form" class="message-form">
+              <input id="message-input" type="text" maxlength="500" placeholder="Type a message..." autocomplete="off" required />
+              <button type="submit">Send</button>
+            </form>
+          </section>
+
+          <aside class="panel presence-panel">
+            <div class="panel-title-row">
+              <div>
+                <h3>Presence</h3>
+                <span id="presence-count" class="count">0 online</span>
+              </div>
+              <div class="presence-controls">
+                <button id="presence-prev" class="ghost-button" type="button">Prev</button>
+                <button id="presence-next" class="ghost-button" type="button">Next</button>
+              </div>
+            </div>
+            <p id="presence-page" class="meta">Showing 0 members.</p>
+            <ul id="presence-list" class="presence-list"></ul>
+          </aside>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

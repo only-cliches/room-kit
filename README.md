@@ -1,63 +1,132 @@
-# channel-kit
+# room-kit
 
-[![GitHub Repo stars](https://img.shields.io/github/stars/only-cliches/channel-kit)](https://github.com/only-cliches/channel-kit)
-[![NPM Version](https://img.shields.io/npm/v/channel-kit)](https://www.npmjs.com/package/channel-kit)
-[![JSR Version](https://img.shields.io/jsr/v/%40onlycliches/channel-kit)](https://jsr.io/@onlycliches/channel-kit)
+[![GitHub Repo stars](https://img.shields.io/github/stars/only-cliches/room-kit)](https://github.com/only-cliches/room-kit)
+[![NPM Version](https://img.shields.io/npm/v/room-kit)](https://www.npmjs.com/package/room-kit)
+[![JSR Version](https://img.shields.io/jsr/v/%40onlycliches/room-kit)](https://jsr.io/@onlycliches/room-kit)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue.svg)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Type-safe channel primitives for Socket.IO events, requests, streams, and room membership.
+Small and type-safe room membership, presence, and realtime messaging for Socket.IO.
 
 ## Install
 
 ```bash
-npm install channel-kit socket.io socket.io-client
+npm install room-kit socket.io socket.io-client
 ```
 
-## Import Matrix
+## Core API
 
-- npm:
-  - `import { channel, createSocketChannels, adaptSocketIoTransport } from "channel-kit";`
-- JSR:
-  - `import { channel, createSocketChannels, adaptSocketIoTransport } from "jsr:@only-cliches/channel-kit@1";`
+- `defineRoomType<TSchema>({ name, presence? })`
+- `serveRoomType(socket, roomType, handlers, adapter?)`
+- `createRoomClient(socket, roomType)`
+- `ClientSafeError`
 
 ## Quick Start
 
 ```ts
 // common.ts
-import { channel } from "channel-kit";
+import { defineRoomType } from "room-kit";
 
-export const typing = channel("chat.typing").event<{ roomId: string; userId: string }>();
-export const sendMessage = channel("chat.sendMessage")
-    .request<{ roomId: string; text: string }>()
-    .response<{ messageId: string }>();
-export const roomMembership = channel("chat.roomMembership").room<{ roomId: string }>();
+type ChatMessage = {
+  id: string;
+  name: string;
+  text: string;
+  sentAt: string;
+};
+
+export const chatRoom = defineRoomType<{
+  joinRequest: {
+    roomId: string;
+    roomKey: string;
+    userName: string;
+  };
+  memberProfile: {
+    userId: string;
+    userName: string;
+  };
+  roomProfile: {
+    roomId: string;
+    created: string;
+  };
+  serverState: {
+    roomKey: string;
+    created: string;
+    history: ChatMessage[];
+  };
+  events: {
+    message: ChatMessage;
+    systemNotice: { text: string; sentAt: string };
+  };
+  rpc: {
+    sendMessage: (input: { text: string }): Promise<{ id: string }>;
+  };
+}>({ name: "chat", presence: "list" });
 ```
 
 ```ts
 // server.ts
+import { randomUUID } from "node:crypto";
 import http from "node:http";
 import { Server } from "socket.io";
-import { adaptSocketIoTransport, createSocketChannels } from "channel-kit";
-import { sendMessage, roomMembership, typing } from "./common";
+import { ClientSafeError, serveRoomType } from "room-kit";
+import { chatRoom } from "./common";
 
 const httpServer = http.createServer();
 const io = new Server(httpServer);
 
 io.on("connection", (socket) => {
-    const api = createSocketChannels(adaptSocketIoTransport(socket));
+  serveRoomType<typeof chatRoom, { userId: string }>(socket, chatRoom, {
+    onAuth: async () => {
+      // Replace with real session/JWT validation.
+      // This is your trusted identity source.
+      return { userId: socket.id };
+    },
+    initState: async (join) => ({
+      // Runs once per room instance (first successful join).
+      roomKey: join.roomKey,
+      created: new Date().toISOString(),
+      history: [],
+    }),
+    admit: async (join, ctx) => {
+      // Admission gate for private rooms.
+      // Throw ClientSafeError for messages safe to show users.
+      if (ctx.serverState.roomKey !== join.roomKey) {
+        throw new ClientSafeError("Invalid room key");
+      }
 
-    api.event(typing).handle((payload, ctx) => {
-        ctx.broadcast.emit(typing, payload);
-    });
-
-    api.request(sendMessage).handle(async () => {
-        return { messageId: crypto.randomUUID() };
-    });
-
-    api.room(roomMembership).handleJoin(async (payload, ctx) => {
-        await ctx.joinRoom(payload.roomId);
-    });
+      return {
+        roomId: join.roomId,
+        memberId: ctx.auth.userId,
+        memberProfile: {
+          userId: ctx.auth.userId,
+          userName: join.userName,
+        },
+        roomProfile: {
+          roomId: join.roomId,
+          created: ctx.serverState.created,
+        },
+      };
+    },
+    events: {
+      // Client emits are allowlisted by key in this object.
+      // If you don't need client-originated events, omit this.
+      message: async () => undefined,
+    },
+    rpc: {
+      sendMessage: async ({ text }, ctx) => {
+        // Prefer RPC for validated state-changing operations.
+        const message = {
+          id: randomUUID(),
+          name: ctx.memberProfile.userName,
+          text,
+          sentAt: new Date().toISOString(),
+        };
+        ctx.serverState.history.push(message);
+        await ctx.emit.message(message);
+        return { id: message.id };
+      },
+    },
+  });
 });
 
 httpServer.listen(3000);
@@ -66,82 +135,117 @@ httpServer.listen(3000);
 ```ts
 // client.ts
 import { io } from "socket.io-client";
-import { adaptSocketIoTransport, createSocketChannels } from "channel-kit";
-import { roomMembership, sendMessage, typing } from "./common";
+import { createRoomClient } from "room-kit";
+import { chatRoom } from "./common";
 
 const socket = io("http://127.0.0.1:3000");
-const api = createSocketChannels(adaptSocketIoTransport(socket));
+const chatClient = createRoomClient(socket, chatRoom);
 
-api.event(typing).send({ roomId: "room-1", userId: "u1" });
-await api.room(roomMembership).join({ roomId: "room-1" });
-const reply = await api.request(sendMessage).call({ roomId: "room-1", text: "hello" });
-console.log(reply.messageId);
+const joined = await chatClient.join({
+  roomId: "team-alpha",
+  roomKey: "secret",
+  userName: "Ada",
+});
+
+joined.on.message((payload, meta) => {
+  // meta.source.kind is "server" or "member".
+  console.log(payload.text, meta.source.kind);
+});
+
+// Fully typed request/response based on your room definition.
+await joined.rpc.sendMessage({ text: "hello" });
+await joined.leave();
 ```
 
-## API Reference
+## Room Schema
 
-### Channel builders
+`defineRoomType<TSchema>()` is type-first. The schema keys are:
 
-- `channel(name).event<TPayload>()`
-- `channel(name).request<TRequest>().response<TResponse>()`
-- `channel(name).subscribe<TSubscribe>().publish<TPublish>()`
-- `channel(name).room<TPayload>()`
+- `joinRequest`: data required to join; must include `roomId`.
+- `memberProfile`: server-tracked member metadata.
+- `roomProfile`: room metadata returned to each joined client; must include `roomId`.
+- `serverState`: private mutable server state per room instance.
+- `events`: named room events.
+- `rpc`: named RPC methods.
 
-### Layer API
+Runtime presence mode is configured in the `defineRoomType` options:
 
-- `api.event(channel).send(payload)`
-- `api.event(channel).on(handler)`
-- `api.event(channel).handle(handler)`
-- `api.request(channel).call(payload, options?)`
-- `api.request(channel).safeCall(payload, options?)`
-- `api.request(channel).handle(handler)`
-- `api.stream(channel).subscribe(params, onPublish)`
-- `api.stream(channel).publish(payload)`
-- `api.stream(channel).handleSubscribe(handler)`
-- `api.stream(channel).onPublish(handler)`
-- `api.room(channel).join(payload, options?)`
-- `api.room(channel).leave(payload, options?)`
-- `api.room(channel).handleJoin(handler)`
-- `api.room(channel).handleLeave(handler)`
+- `"none"`: no presence query support.
+- `"count"`: only count support.
+- `"list"`: count + paginated members.
 
-### Handler context
+## Server Handlers
 
-- `ctx.emit(eventChannel, payload)`
-- `ctx.publish(streamChannel, payload)`
-- `ctx.joinRoom(roomId)`
-- `ctx.leaveRoom(roomId)`
-- `ctx.toRoom(roomId).emit(...)`
-- `ctx.toRoom(roomId).publish(...)`
-- `ctx.broadcast.emit(...)`
-- `ctx.broadcast.publish(...)`
+`serveRoomType(socket, roomType, handlers, adapter?)` accepts:
 
-## Failure Semantics
+- `onAuth(socket)`: optional unless you type a non-`unknown` auth context.
+- `onConnect(socket, auth)`: optional transport-connect hook (runs once per socket handler attach).
+- `revalidateAuth(socket, auth)`: optional per-request auth validation/rotation hook.
+- `initState(joinRequest)`: initialize room server state on first join.
+- `admit(joinRequest, ctx)`: required gate; returns `roomId`, `memberId`, `memberProfile`, `roomProfile`.
+- `onJoin(memberProfile, ctx)` / `onLeave(memberProfile, ctx)`: room membership lifecycle hooks (`onLeave` also runs on socket disconnect for joined rooms).
+- `onDisconnect(socket, auth)`: optional transport-disconnect hook.
+- `events`: handlers for client-emitted events.
+- `rpc`: handlers for client RPC calls.
 
-- `api.request(channel).call(...)`:
-  - Resolves with response payload on success.
-  - Throws a `RequestFailure` variant on failure.
-- `api.request(channel).safeCall(...)`:
-  - Returns `Ok<TResponse>` on success.
-  - Returns `Err<RequestFailure>` on failure.
+Server context (`ctx`) includes:
 
-Current `RequestFailure` variants:
+- `ctx.auth`, `ctx.memberId`, `ctx.memberProfile`
+- `ctx.roomProfile`, `ctx.serverState`
+- `ctx.emit.<event>(payload)` to emit to current room
+- `ctx.broadcast.emit.<event>(payload)` to emit across namespace
+- `ctx.broadcast.toRoom(roomId).emit.<event>(payload)`
+- `ctx.broadcast.toMembers(memberIds).emit.<event>(payload)`
+- `ctx.getPresence()`, `ctx.getPresenceCount()`, `ctx.listPresenceMembers({ offset, limit })`
 
-- `Timeout { ms }`
-- `InvalidResponse { reason }`
-- `Rejected { error }`
+`serveRoomType` returns a handle:
 
-`api.room(channel).join(...)` and `leave(...)` use the same failure style as `.call(...)` and throw `RequestFailure` variants.
+- `stop()` unregisters listeners for that socket
+- `stop.rooms()`, `stop.room(roomId)`, `stop.count(roomId)`, `stop.members(roomId, query)` for introspection
+
+## Client API
+
+`createRoomClient(socket, roomType)` returns:
+
+- `client.name`
+- `client.connection.current` (`"connecting" | "connected" | "reconnecting" | "disconnected"`)
+- `client.connection.onChange(handler)`
+- `client.join(joinRequest) -> joinedRoom`
+
+`joinedRoom` includes:
+
+- `joinedRoom.roomId`, `joinedRoom.memberId`, `joinedRoom.roomProfile`
+- `joinedRoom.rpc.<name>(...args)`
+- `joinedRoom.emit.<event>(payload)` (must match a declared server `events` handler)
+- `joinedRoom.on.<event>((payload, meta) => {})`
+- `joinedRoom.leave()`
+- `joinedRoom.presence` only when presence is enabled by room definition:
+- `presence.current`
+- `presence.onChange(handler)`
+- `presence.count()`
+- `presence.list({ offset, limit })` only for `"list"` presence
+
+## Errors and Security
+
+- Throw `ClientSafeError` for messages you want sent to clients.
+- Non-`ClientSafeError` exceptions are sanitized to: `"An internal server error occurred."`
+- RPC and event dispatch only allow own properties (`Object.hasOwn`) to prevent prototype-based handler access.
+- Client event names are default-deny unless explicitly declared in `handlers.events`.
+- Do not trust client payloads for authorization; derive identity in `onAuth`.
+- Validate runtime payload shapes in your handlers. TypeScript types are compile-time only.
 
 ## Reconnect Behavior
 
-- Active stream subscriptions are replayed after reconnect.
-- Successful room joins made through `api.room(...).join(...)` are replayed after reconnect.
-- `api.room(...).leave(...)` removes replay state for that room payload.
-- Request calls are not replayed.
+- Joined rooms are automatically replayed after socket reconnect.
+- Replay uses the original `joinRequest` payload.
+- If replay fails, that joined room is removed from the client registry.
 
-## Security Notes
+## Example App
 
-- Clients do not target rooms directly; routing is server-authoritative.
-- Always validate join/leave permissions in server handlers.
-- Do not treat client payloads as trusted authorization state.
-- Use room membership APIs as transport routing controls, not as business-level authorization by themselves.
+A complete chat example is in the `example` directory:
+
+```bash
+cd example
+npm install
+npm start
+```

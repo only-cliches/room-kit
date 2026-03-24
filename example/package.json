@@ -1,0 +1,17 @@
+{
+  "name": "room-kit-example-chat",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:client": "esbuild public/app.ts --bundle --format=iife --platform=browser --outfile=public/app.js",
+    "start": "npm run build:client && tsx server.ts"
+  },
+  "dependencies": {
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "tsx": "^4.20.5"
+  }
+}

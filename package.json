@@ -1,7 +1,7 @@
 {
-  "name": "channel-kit",
+  "name": "room-kit",
   "version": "1.0.0",
-  "description": "Type-safe channel abstractions for Socket.IO events, requests, streams, and room membership.",
+  "description": "Type-safe room membership, presence, and realtime messaging for Socket.IO.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -10,30 +10,31 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/only-cliches/channel-kit.git"
+    "url": "git+https://github.com/only-cliches/room-kit.git"
   },
   "keywords": [
     "socket.io",
-    "channels",
+    "rooms",
+    "presence",
+    "membership",
     "typescript",
     "realtime",
+    "private rooms",
+    "rpc",
     "events",
-    "requests",
-    "streams",
-    "rooms",
     "pubsub"
   ],
   "author": "Scott Lott <me@scottlott.com>",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/only-cliches/channel-kit/issues"
+    "url": "https://github.com/only-cliches/room-kit/issues"
   },
-  "homepage": "https://github.com/only-cliches/channel-kit#readme",
+  "homepage": "https://github.com/only-cliches/room-kit#readme",
   "dependencies": {
-    "iron-enum": "^1.8.0",
-    "socket.io": "^4.8.3"
+    
   },
   "devDependencies": {
+    "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
     "typescript": "^6.0.2",
     "vitest": "^4.1.1"
