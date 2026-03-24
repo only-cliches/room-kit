@@ -14,6 +14,7 @@ import type {
     RoomDefinition,
     RoomEvents,
     RoomProfileFor,
+    RoomListenApi,
     RoomRpc,
     RpcClientApi,
 } from "./types";
@@ -164,18 +165,40 @@ function createJoinedRoom<TRoom extends RoomDefinition<any>>(
             }
 
             return (handler: (payload: unknown, meta: EventMetaFor<TRoom>) => void) => {
-                const handlers = state.eventListeners.get(key) ?? new Set();
-                handlers.add(handler);
-                state.eventListeners.set(key, handlers);
-                return () => {
-                    handlers.delete(handler);
-                    if (handlers.size === 0) {
-                        state.eventListeners.delete(key);
-                    }
-                };
+                return registerEventListener(state, key, handler);
             };
         },
     });
+
+    const listen = (options: RoomListenApi<TRoom>): (() => void) => {
+        const cleanups: Array<() => void> = [];
+
+        if (options.events) {
+            for (const [key, handler] of Object.entries(options.events) as Array<
+                [string, (payload: unknown, meta: EventMetaFor<TRoom>) => void]
+            >) {
+                if (typeof handler !== "function") {
+                    continue;
+                }
+                cleanups.push(registerEventListener(state, key, handler));
+            }
+        }
+
+        if ("presence" in options && options.presence?.onChange) {
+            cleanups.push(registerPresenceListener(state, options.presence.onChange));
+        }
+
+        let cleaned = false;
+        return () => {
+            if (cleaned) {
+                return;
+            }
+            cleaned = true;
+            for (const cleanup of cleanups) {
+                cleanup();
+            }
+        };
+    };
 
     const base = {
         name: state.name,
@@ -185,6 +208,7 @@ function createJoinedRoom<TRoom extends RoomDefinition<any>>(
         rpc,
         emit,
         on,
+        listen,
         async leave(): Promise<void> {
             await emitAck<void>(socket, LEAVE_EVENT, {
                 roomType: state.name,
@@ -203,10 +227,7 @@ function createJoinedRoom<TRoom extends RoomDefinition<any>>(
                         return state.presenceCurrent as PresenceFor<TRoom>;
                     },
                     onChange(handler: (presence: PresenceFor<TRoom>) => void): () => void {
-                        state.presenceListeners.add(handler);
-                        return () => {
-                            state.presenceListeners.delete(handler);
-                        };
+                        return registerPresenceListener(state, handler);
                     },
                     count(): Promise<number> {
                         return emitAck<number>(socket, PRESENCE_QUERY_EVENT, {
@@ -229,6 +250,32 @@ function createJoinedRoom<TRoom extends RoomDefinition<any>>(
             return Reflect.get(target, key, receiver);
         },
     }) as JoinedRoom<TRoom>;
+}
+
+function registerEventListener<TRoom extends RoomDefinition<any>>(
+    state: JoinedRoomState<TRoom>,
+    key: string,
+    handler: (payload: unknown, meta: EventMetaFor<TRoom>) => void,
+): () => void {
+    const handlers = state.eventListeners.get(key) ?? new Set();
+    handlers.add(handler);
+    state.eventListeners.set(key, handlers);
+    return () => {
+        handlers.delete(handler);
+        if (handlers.size === 0) {
+            state.eventListeners.delete(key);
+        }
+    };
+}
+
+function registerPresenceListener<TRoom extends RoomDefinition<any>>(
+    state: JoinedRoomState<TRoom>,
+    handler: (presence: PresenceFor<TRoom>) => void,
+): () => void {
+    state.presenceListeners.add(handler);
+    return () => {
+        state.presenceListeners.delete(handler);
+    };
 }
 
 function getClientRegistry(socket: ClientSocketLike): ClientRegistry {

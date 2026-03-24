@@ -61,7 +61,10 @@ export const chatRoom = defineRoomType<{
   rpc: {
     sendMessage: (input: { text: string }): Promise<{ id: string }>;
   };
-}>({ name: "chat", presence: "list" });
+}>({ 
+  name: "chat", // namespace
+  presence: "list" // allow clients to list room members
+});
 ```
 
 ```ts
@@ -155,13 +158,23 @@ const joined = await chatClient.join({
 });
 
 // Event payload and metadata are both inferred from the room schema.
-joined.on.message((payload, meta) => {
-  // meta.source.kind is "server" or "member".
-  console.log(payload.text, meta.source.kind);
+const cleanup = joined.listen({
+  events: {
+    message: (payload, meta) => {
+      // meta.source.kind is "server" or "member".
+      console.log(payload.text, meta.source.kind);
+    },
+  },
+  presence: {
+    onChange: (presence) => {
+      console.log(`${presence.count} members online`);
+    },
+  },
 });
 
 // Fully typed request/response based on your room definition.
 await joined.rpc.sendMessage({ text: "hello" });
+cleanup();
 // Cleanly leave the room when you're done.
 await joined.leave();
 ```
@@ -188,7 +201,7 @@ Runtime presence mode is configured in the `defineRoomType` options:
 
 `serveRoomType(socket, roomType, handlers, adapter?)` accepts:
 
-- `onAuth(socket)`: optional unless you type a non-`unknown` auth context.
+- `onAuth(socket)`: optional unless you type a non-`unknown` auth context. Return `false` to reject the socket before room initialization.
 - `onConnect(socket, auth)`: optional transport-connect hook attempted once when the socket handler is attached (after auth resolution).
 - `revalidateAuth(socket, auth)`: optional per-request auth validation hook; return `{ kind: "ok", auth? }` to continue or `{ kind: "reject" }` to deny.
 - `initState(joinRequest)`: initializes room server state on first join for a given room instance.
@@ -212,11 +225,11 @@ Server context (`ctx`) includes:
 
 `serveRoomType` returns a handle:
 
-- `stop()` unregisters listeners for that socket
-- `stop.rooms()` returns snapshots for all rooms on the namespace
-- `stop.room(roomId)` returns one room snapshot or `undefined`
-- `stop.count(roomId)` returns the current member count for a room (`0` when the room does not exist; throws when room presence mode is `"none"`)
-- `stop.members(roomId, query)` returns a paginated presence listing (`{ count: 0, offset: 0, limit: 0, members: [] }` when the room does not exist; throws when room presence mode is not `"list"`)
+- `handle.cleanup()` unregisters listeners for that socket
+- `handle.rooms()` returns snapshots for all rooms on the namespace
+- `handle.room(roomId)` returns one room snapshot or `undefined`
+- `handle.count(roomId)` returns the current member count for a room (`0` when the room does not exist; throws when room presence mode is `"none"`)
+- `handle.members(roomId, query)` returns a paginated presence listing (`{ count: 0, offset: 0, limit: 0, members: [] }` when the room does not exist; throws when room presence mode is not `"list"`)
 
 ## Client API
 
@@ -233,6 +246,7 @@ Server context (`ctx`) includes:
 - `joinedRoom.rpc.<name>(...args)` for typed RPC calls
 - `joinedRoom.emit.<event>(payload)` for client-emitted room events
 - `joinedRoom.on.<event>((payload, meta) => {})` for room event subscriptions
+- `joinedRoom.listen({ events, presence })` batches event and presence subscriptions and returns one cleanup function
 - `joinedRoom.leave()` to leave the room and unregister the joined-room handle
 - `joinedRoom.presence` is part of the typed API when room presence mode is `"count"` or `"list"`; it exposes `current`, `onChange(handler)`, `count()`, and `list({ offset, limit })` when presence mode is `"list"`.
 
@@ -240,6 +254,7 @@ Server context (`ctx`) includes:
 
 - Throw `ClientSafeError` for messages you want sent to clients.
 - Non-`ClientSafeError` exceptions are sanitized to: `"An internal server error occurred."`
+- `onAuth` may return `false` to reject the socket before any room state is initialized.
 - RPC and event dispatch only allow own properties (`Object.hasOwn`) to prevent prototype-based handler access.
 - Client event names are default-deny unless explicitly declared in `handlers.events`.
 - Do not trust client payloads for authorization; derive identity in `onAuth`.

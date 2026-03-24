@@ -219,6 +219,13 @@ export type EventListener<TRoom extends RoomDefinition<any>, TName extends keyof
 ) => void;
 
 /**
+ * Event listener map accepted by `JoinedRoom.listen`.
+ */
+export type RoomEventListenerMap<TRoom extends RoomDefinition<any>> = Partial<{
+    [K in keyof RoomEvents<TRoom>]: EventListener<TRoom, K>;
+}>;
+
+/**
  * Server-side snapshot entry for a connected socket membership.
  */
 export type RoomMemberSnapshot<TRoom extends RoomDefinition<any>> = {
@@ -271,16 +278,31 @@ export type JoinedRoom<TRoom extends RoomDefinition<any>> = {
     readonly rpc: RpcClientApi<TRoom>;
     readonly emit: EventEmitApi<TRoom>;
     readonly on: EventListenApi<TRoom>;
+    listen(options: RoomListenApi<TRoom>): () => void;
     leave(): Promise<void>;
 } & PresenceClientApi<TRoom>;
 
 /**
+ * Batched listener registration accepted by `JoinedRoom.listen`.
+ */
+export type RoomListenApi<TRoom extends RoomDefinition<any>> = {
+    readonly events?: RoomEventListenerMap<TRoom>;
+} & ([PresenceFor<TRoom>] extends [never]
+    ? {}
+    : {
+        readonly presence?: {
+            onChange: (presence: PresenceFor<TRoom>) => void;
+        };
+    });
+
+/**
  * Handle returned by `serveRoomType`.
  *
- * The handle is callable and unregisters listeners for the bound socket.
+ * The handle unregisters listeners for the bound socket via `cleanup()`.
  * It also exposes read-only introspection helpers for tests and diagnostics.
  */
-export type RoomServerHandle<TRoom extends RoomDefinition<any>> = (() => void) & {
+export type RoomServerHandle<TRoom extends RoomDefinition<any>> = {
+    cleanup(): void;
     rooms(): Array<RoomSnapshot<TRoom>>;
     room(roomId: string): RoomSnapshot<TRoom> | undefined;
     members(roomId: string, query?: PresenceListQuery): PresencePageFor<TRoom> | undefined;
@@ -439,14 +461,16 @@ type RoomServerHandlersCommon<TRoom extends RoomDefinition<any>, TAuth> = {
  *
  * `onAuth` is required when `TAuth` is explicitly typed to a non-`unknown`
  * shape, and optional otherwise.
+ *
+ * Returning `false` rejects the socket before any room state is initialized.
  */
 export type RoomServerHandlers<TRoom extends RoomDefinition<any>, TAuth = unknown> =
     IsUnknown<TAuth> extends true
         ? RoomServerHandlersCommon<TRoom, TAuth> & {
-            onAuth?(socket: ServerSocketLike): Promise<TAuth> | TAuth;
+            onAuth?(socket: ServerSocketLike): Promise<TAuth | false> | TAuth | false;
         }
         : RoomServerHandlersCommon<TRoom, TAuth> & {
-            onAuth(socket: ServerSocketLike): Promise<TAuth> | TAuth;
+            onAuth(socket: ServerSocketLike): Promise<TAuth | false> | TAuth | false;
         };
 
 /**

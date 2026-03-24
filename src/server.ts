@@ -185,13 +185,13 @@ const namespaceStates = new WeakMap<object, NamespaceState>();
 /**
  * Attaches room runtime handlers to a connected server socket.
  *
- * Returns a callable handle that unregisters all listeners for the bound
- * socket, and exposes room introspection helpers.
+ * Returns a handle that unregisters all listeners for the bound socket via
+ * `cleanup()`, and exposes room introspection helpers.
  *
  * @example
  * ```ts
  * io.on("connection", (socket) => {
- *   const stop = serveRoomType(socket, chatRoomType, {
+ *   const handle = serveRoomType(socket, chatRoomType, {
  *     onAuth: async () => ({ userId: socket.id }),
  *     admit: async (join, ctx) => ({
  *       roomId: join.roomId,
@@ -202,7 +202,7 @@ const namespaceStates = new WeakMap<object, NamespaceState>();
  *   });
  *
  *   // Later if needed:
- *   // stop();
+ *   // handle.cleanup();
  * });
  * ```
  */
@@ -234,9 +234,9 @@ export function serveRoomType<TRoom extends RoomDefinition<any>, TAuth = unknown
             }
 
             const existingRoomState = roomCollection.get(requestedRoomId);
+            const auth = await resolveSocketAuth(socket, handlers, authCache, true);
             const initialState = (existingRoomState?.serverState ??
                 await Promise.resolve(handlers.initState?.(frame.payload as JoinRequest<TRoom>) ?? {})) as ServerStateFor<TRoom>;
-            const auth = await resolveSocketAuth(socket, handlers, authCache, true);
             const provisional = createContext<TRoom, TAuth>(socket, namespaceState, {
                 adapter,
                 name: frame.roomType,
@@ -567,7 +567,7 @@ export function serveRoomType<TRoom extends RoomDefinition<any>, TAuth = unknown
             .catch(() => undefined);
     }
 
-    const stop = () => {
+    const cleanup = () => {
         socket.off(JOIN_EVENT, onJoin);
         socket.off(LEAVE_EVENT, onLeave);
         socket.off(RPC_EVENT, onRpc);
@@ -576,13 +576,14 @@ export function serveRoomType<TRoom extends RoomDefinition<any>, TAuth = unknown
         socket.off("disconnect", onDisconnect);
     };
 
-    return Object.assign(stop, {
+    return {
+        cleanup,
         rooms: () => listRoomSnapshots<TRoom>(namespaceState, _room.name),
         room: (roomId: string) => getRoomSnapshot<TRoom>(namespaceState, _room.name, roomId),
         members: (roomId: string, query?: PresenceListQuery) =>
             getPresenceMembersPage<TRoom>(namespaceState, _room.name, roomId, query),
         count: (roomId: string) => getPresenceCount(namespaceState, _room.name, roomId),
-    });
+    };
 }
 
 function createContext<TRoom extends RoomDefinition<any>, TAuth = unknown>(
@@ -652,6 +653,11 @@ async function resolveSocketAuth<TAuth>(
     if (entry.value === undefined) {
         const pending = Promise.resolve(handlers.onAuth?.(socket) as TAuth)
             .then((auth) => {
+                if (auth === false) {
+                    authCache.delete(socket);
+                    throw new ClientSafeError("Unauthorized");
+                }
+
                 const current = authCache.get(socket) ?? {};
                 current.value = auth;
                 current.pending = undefined;

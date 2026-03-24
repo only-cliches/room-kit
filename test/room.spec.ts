@@ -282,7 +282,7 @@ describe("room kit", () => {
 
 		expect(connection.serverSocket.joinedRooms).toEqual([]);
 
-		stop();
+		stop.cleanup();
 		connection.close();
 	});
 
@@ -317,8 +317,8 @@ describe("room kit", () => {
 		expect(seenA).toEqual(["only-a"]);
 		expect(seenB).toEqual([]);
 
-		stopA();
-		stopB();
+		stopA.cleanup();
+		stopB.cleanup();
 		connectionA.close();
 		connectionB.close();
 	});
@@ -357,8 +357,8 @@ describe("room kit", () => {
 			expect(aliceRoom.roomProfile.created).toBe("2026-03-23T00:00:00.000Z");
 			expect(bobRoom.roomProfile.created).toBe("2026-03-23T00:00:00.000Z");
 
-		first.stop();
-		second.stop();
+		first.stop.cleanup();
+		second.stop.cleanup();
 		first.connection.close();
 		second.connection.close();
 	});
@@ -396,8 +396,8 @@ describe("room kit", () => {
 		expect(aliceNotices).toEqual(["private hello"]);
 		expect(bobNotices).toEqual([]);
 
-		first.stop();
-		second.stop();
+		first.stop.cleanup();
+		second.stop.cleanup();
 		first.connection.close();
 		second.connection.close();
 	});
@@ -454,10 +454,103 @@ describe("room kit", () => {
 		expect(aliceRoomNotices).toEqual(["room scoped"]);
 		expect(bobRoomNotices).toEqual([]);
 
-		first.stop();
-		second.stop();
+		first.stop.cleanup();
+		second.stop.cleanup();
 		first.connection.close();
 		second.connection.close();
+	});
+
+	it("exposes a cleanup alias on the server handle", async () => {
+		const namespace = new MockNamespace();
+		const roomType = createRoomType("cleanup-alias", "list");
+		let onDisconnectCalls = 0;
+		const handlers = {
+			...createBaseHandlers(),
+			onDisconnect: async () => {
+				onDisconnectCalls += 1;
+			},
+		};
+		const pair = createClientPair(namespace, "alice-socket", roomType, handlers);
+
+		await pair.client.join({
+			roomId: "room-1",
+			roomKey: "shared-key",
+			userId: "alice",
+			userName: "Ada",
+		});
+
+		expect(typeof pair.stop.cleanup).toBe("function");
+		pair.stop.cleanup();
+
+		pair.connection.serverSocket.receive("disconnect", undefined);
+		await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+		expect(onDisconnectCalls).toBe(0);
+
+		pair.connection.close();
+	});
+
+	it("supports batched listen handlers for events and presence", async () => {
+		const namespace = new MockNamespace();
+		const roomType = createRoomType("batched-listen", "list");
+		const handlers = createBaseHandlers();
+		const alice = createClientPair(namespace, "alice-socket", roomType, handlers);
+		const bob = createClientPair(namespace, "bob-socket", roomType, handlers);
+		const carol = createClientPair(namespace, "carol-socket", roomType, handlers);
+
+		const aliceRoom = await alice.client.join({
+			roomId: "room-1",
+			roomKey: "shared-key",
+			userId: "alice",
+			userName: "Ada",
+		});
+
+		const seenMessages: string[] = [];
+		const seenPresenceCounts: number[] = [];
+		const cleanup = aliceRoom.listen({
+			events: {
+				message: (payload) => {
+					seenMessages.push(payload.text);
+				},
+			},
+			presence: {
+				onChange: (presence) => {
+					seenPresenceCounts.push(presence.count);
+				},
+			},
+		});
+
+		const bobRoom = await bob.client.join({
+			roomId: "room-1",
+			roomKey: "shared-key",
+			userId: "bob",
+			userName: "Ben",
+		});
+
+		expect(seenPresenceCounts).toContain(2);
+
+		await bobRoom.rpc.sendMessage({ text: "hello" });
+		expect(seenMessages).toEqual(["hello"]);
+
+		cleanup();
+
+		const carolRoom = await carol.client.join({
+			roomId: "room-1",
+			roomKey: "shared-key",
+			userId: "carol",
+			userName: "Cid",
+		});
+
+		await carolRoom.rpc.sendMessage({ text: "after-cleanup" });
+		expect(seenMessages).toEqual(["hello"]);
+		expect(seenPresenceCounts).toEqual([2]);
+
+		alice.stop.cleanup();
+		bob.stop.cleanup();
+		carol.stop.cleanup();
+		alice.connection.close();
+		bob.connection.close();
+		carol.connection.close();
 	});
 
 	it("reports presence counts and paginated member lists", async () => {
@@ -506,9 +599,9 @@ describe("room kit", () => {
 			],
 		});
 
-		first.stop();
-		second.stop();
-		third.stop();
+		first.stop.cleanup();
+		second.stop.cleanup();
+		third.stop.cleanup();
 		first.connection.close();
 		second.connection.close();
 		third.connection.close();
@@ -550,9 +643,9 @@ describe("room kit", () => {
 			],
 		});
 
-		first.stop();
-		second.stop();
-		third.stop();
+		first.stop.cleanup();
+		second.stop.cleanup();
+		third.stop.cleanup();
 		first.connection.close();
 		second.connection.close();
 		third.connection.close();
@@ -602,8 +695,8 @@ describe("room kit", () => {
 		await bobRoom.rpc.sendMessage({ text: "after-disconnect" });
 		expect(rejoinedSeen).toEqual([]);
 
-		first.stop();
-		second.stop();
+		first.stop.cleanup();
+		second.stop.cleanup();
 		first.connection.close();
 		second.connection.close();
 	});
@@ -642,8 +735,8 @@ describe("room kit", () => {
 		expect(seen).toEqual(["before reconnect", "after reconnect"]);
 		expect(first.connection.serverSocket.joinedRooms).toEqual(["room-1", "room-1"]);
 
-		first.stop();
-		second.stop();
+		first.stop.cleanup();
+		second.stop.cleanup();
 		first.connection.close();
 		second.connection.close();
 	});
@@ -687,8 +780,8 @@ describe("room kit", () => {
 			],
 		});
 
-		first.stop();
-		second.stop();
+		first.stop.cleanup();
+		second.stop.cleanup();
 		first.connection.close();
 		second.connection.close();
 	});
@@ -744,8 +837,8 @@ describe("room kit", () => {
 			},
 		]);
 
-		first.stop();
-		second.stop();
+		first.stop.cleanup();
+		second.stop.cleanup();
 		first.connection.close();
 		second.connection.close();
 	});
@@ -778,7 +871,7 @@ describe("room kit", () => {
 			}),
 		).rejects.toThrow("Admission roomId must match join request roomId");
 
-		stop();
+		stop.cleanup();
 		connection.close();
 	});
 
@@ -809,7 +902,41 @@ describe("room kit", () => {
 			}),
 		).rejects.toThrow("unauthorized");
 
-		stop();
+		stop.cleanup();
+		connection.close();
+	});
+
+	it("rejects when onAuth returns false before initState runs", async () => {
+		const namespace = new MockNamespace();
+		const roomType = createRoomType("reject-auth-false", "list");
+		let initCalls = 0;
+		const handlers: RoomServerHandlers<typeof roomType, { userId: string }> = {
+			onAuth: async () => false,
+			initState: async () => {
+				initCalls += 1;
+				return {
+					roomKey: "shared-key",
+					created: "2026-03-23T00:00:00.000Z",
+					history: [],
+				};
+			},
+			admit: async () => {
+				throw new ClientSafeError("should not admit");
+			},
+		};
+		const { client, connection, stop } = createClientPair(namespace, "alice-socket", roomType, handlers);
+
+		await expect(
+			client.join({
+				roomId: "room-1",
+				roomKey: "shared-key",
+				userId: "alice",
+				userName: "Ada",
+			}),
+		).rejects.toThrow("Unauthorized");
+		expect(initCalls).toBe(0);
+
+		stop.cleanup();
 		connection.close();
 	});
 
@@ -909,7 +1036,7 @@ describe("room kit", () => {
 
 		expect(authCalls).toBe(1);
 
-		stop();
+		stop.cleanup();
 		connection.close();
 	});
 
@@ -958,7 +1085,7 @@ describe("room kit", () => {
 		]);
 		expect(authCalls).toBe(1);
 
-		stop();
+		stop.cleanup();
 		connection.close();
 	});
 
@@ -1014,7 +1141,7 @@ describe("room kit", () => {
 		]);
 		expect(authCalls).toBe(1);
 
-		stop();
+		stop.cleanup();
 		connection.close();
 	});
 
@@ -1085,7 +1212,7 @@ describe("room kit", () => {
 		await expect(joined.rpc.sendMessage({ text: "hello" })).rejects.toThrow("session expired");
 		expect(revalidateCalls).toBe(2);
 
-		stop();
+		stop.cleanup();
 		connection.close();
 	});
 
@@ -1153,7 +1280,7 @@ describe("room kit", () => {
 		expect(revalidateCalls).toBe(2);
 		expect(observedRpcAuthVersion).toBe(3);
 
-		stop();
+		stop.cleanup();
 		connection.close();
 	});
 
@@ -1185,7 +1312,7 @@ describe("room kit", () => {
 
 		expect(revalidateCalls).toBe(3);
 
-		pair.stop();
+		pair.stop.cleanup();
 		pair.connection.close();
 	});
 
@@ -1229,7 +1356,7 @@ describe("room kit", () => {
 		await expect(room.emit.relay({ text: "blocked" })).rejects.toThrow("session expired");
 		expect(relayCalls).toBe(0);
 
-		pair.stop();
+		pair.stop.cleanup();
 		pair.connection.close();
 	});
 
@@ -1263,7 +1390,7 @@ describe("room kit", () => {
 
 		expect(sequence).toEqual(["onDisconnect", "onLeave:alice"]);
 
-		pair.stop();
+		pair.stop.cleanup();
 		pair.connection.close();
 	});
 
@@ -1303,8 +1430,8 @@ describe("room kit", () => {
 		expect(await bobRoom.presence.count()).toBe(1);
 		expect(bob.stop.count("room-1")).toBe(1);
 
-		alice.stop();
-		bob.stop();
+		alice.stop.cleanup();
+		bob.stop.cleanup();
 		alice.connection.close();
 		bob.connection.close();
 	});
@@ -1334,7 +1461,7 @@ describe("room kit", () => {
 			id: "message-1",
 		});
 
-		pair.stop();
+		pair.stop.cleanup();
 		pair.connection.close();
 	});
 
@@ -1402,7 +1529,7 @@ describe("room kit", () => {
 		});
 		expect(authCalls).toBe(2);
 
-		pair.stop();
+		pair.stop.cleanup();
 		pair.connection.close();
 	});
 
@@ -1444,7 +1571,7 @@ describe("room kit", () => {
 		expect(disconnectCalls).toBe(1);
 		expect(leftRoomIds.slice().sort()).toEqual(["room-1", "room-2"]);
 
-		pair.stop();
+		pair.stop.cleanup();
 		pair.connection.close();
 	});
 
@@ -1487,7 +1614,7 @@ describe("room kit", () => {
 
 		expect(disconnectVersion).toBe(4);
 
-		pair.stop();
+		pair.stop.cleanup();
 		pair.connection.close();
 	});
 
@@ -1525,7 +1652,7 @@ describe("room kit", () => {
 		revoked = true;
 		await expect(room.presence.list({ offset: 0, limit: 10 })).rejects.toThrow("presence list blocked");
 
-		pair.stop();
+		pair.stop.cleanup();
 		pair.connection.close();
 	});
 
@@ -1592,8 +1719,8 @@ describe("room kit", () => {
 		expect(await bobRoom.presence.count()).toBe(1);
 		expect(onLeaveCalls).toBe(0);
 
-		alice.stop();
-		bob.stop();
+		alice.stop.cleanup();
+		bob.stop.cleanup();
 		alice.connection.close();
 		bob.connection.close();
 	});
@@ -1634,7 +1761,7 @@ describe("room kit", () => {
 		mode = "generic";
 		await expect(room.rpc.sendMessage({ text: "generic" })).rejects.toThrow("An internal server error occurred.");
 
-		pair.stop();
+		pair.stop.cleanup();
 		pair.connection.close();
 	});
 
@@ -1707,11 +1834,11 @@ describe("room kit", () => {
 		expect(second.id).toBe("message-1");
 		expect(onAuthCalls).toBe(2);
 
-		pair.stop();
+		pair.stop.cleanup();
 		pair.connection.close();
 	});
 
-	it("does not invoke lifecycle hooks after stop()", async () => {
+	it("does not invoke lifecycle hooks after cleanup()", async () => {
 		const namespace = new MockNamespace();
 		type Auth = {
 			userId: string;
@@ -1738,7 +1865,7 @@ describe("room kit", () => {
 			userName: "Ada",
 		});
 
-		pair.stop();
+		pair.stop.cleanup();
 		pair.connection.serverSocket.receive("disconnect", undefined);
 		await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
@@ -1787,9 +1914,9 @@ describe("room kit", () => {
 		await bobRoom.rpc.sendMessage({ text: "still-here" });
 		expect(seen).toEqual(["still-here"]);
 
-		alicePrimary.stop();
-		aliceSecondary.stop();
-		bob.stop();
+		alicePrimary.stop.cleanup();
+		aliceSecondary.stop.cleanup();
+		bob.stop.cleanup();
 		alicePrimary.connection.close();
 		aliceSecondary.connection.close();
 		bob.connection.close();
@@ -1866,7 +1993,7 @@ describe("room kit", () => {
 		expect(seen.presence).toEqual([2, 4]);
 		expect(seen.rpc).toEqual([3, 5]);
 
-		pair.stop();
+		pair.stop.cleanup();
 		pair.connection.close();
 	});
 
@@ -1903,7 +2030,7 @@ describe("room kit", () => {
 		await expect((room.presence as any).list()).rejects.toThrow("Presence is disabled for this room");
 		expect(() => stop.count("room-1")).toThrow("Presence is disabled for this room");
 
-		stop();
+		stop.cleanup();
 		connection.close();
 	});
 
@@ -1924,7 +2051,7 @@ describe("room kit", () => {
 		await expect((room.presence as any).list()).rejects.toThrow("Member lists are disabled for this room");
 		expect(() => stop.members("room-1")).toThrow("Member lists are disabled for this room");
 
-		stop();
+		stop.cleanup();
 		connection.close();
 	});
 
@@ -1943,7 +2070,7 @@ describe("room kit", () => {
 
 		await expect((room.emit as any).doesNotExist({ text: "nope" })).rejects.toThrow("Unknown event 'doesNotExist'");
 
-		stop();
+		stop.cleanup();
 		connection.close();
 	});
 
@@ -1984,8 +2111,8 @@ describe("room kit", () => {
 		await expect(bobRoom.presence.count()).resolves.toBe(2);
 		await expect((bobRoom.presence as any).list()).rejects.toThrow("Member lists are disabled for this room");
 
-		alicePair.stop();
-		bobPair.stop();
+		alicePair.stop.cleanup();
+		bobPair.stop.cleanup();
 		alicePair.connection.close();
 		bobPair.connection.close();
 	});
@@ -2017,8 +2144,8 @@ describe("room kit", () => {
 		await expect(aliceRoom.presence.count()).resolves.toBe(2);
 		await expect((aliceRoom.presence as any).list()).rejects.toThrow("Member lists are disabled for this room");
 
-		alice.stop();
-		bob.stop();
+		alice.stop.cleanup();
+		bob.stop.cleanup();
 		alice.connection.close();
 		bob.connection.close();
 	});
@@ -2047,7 +2174,7 @@ describe("room kit", () => {
 		await room.presence.count();
 		expect(calls).toBe(3);
 
-		pair.stop();
+		pair.stop.cleanup();
 		pair.connection.close();
 	});
 
@@ -2070,7 +2197,7 @@ describe("room kit", () => {
 
 		await expect(room.presence.count()).rejects.toThrow("presence blocked");
 
-		pair.stop();
+		pair.stop.cleanup();
 		pair.connection.close();
 	});
 
@@ -2093,7 +2220,7 @@ describe("room kit", () => {
 
 		await expect(room.presence.count()).rejects.toThrow("An internal server error occurred.");
 
-		pair.stop();
+		pair.stop.cleanup();
 		pair.connection.close();
 	});
 
@@ -2127,8 +2254,8 @@ describe("room kit", () => {
 		await expect(aliceRoom.presence.list()).resolves.toMatchObject({ count: 2 });
 		await expect((bobRoom.presence as any).list()).rejects.toThrow("Member lists are disabled for this room");
 
-		alice.stop();
-		bob.stop();
+		alice.stop.cleanup();
+		bob.stop.cleanup();
 		alice.connection.close();
 		bob.connection.close();
 	});
@@ -2145,10 +2272,10 @@ describe("room kit", () => {
 			userName: "Ada",
 		});
 
-		await expect((room.emit as any)["__proto__"]({ text: "x" })).rejects.toThrow("Unknown event '__proto__'");
-		await expect((room.emit as any)["toString"]({ text: "x" })).rejects.toThrow("Unknown event 'toString'");
+		await expect((room.emit as any)["__proto__"]({ text: "x" })).rejects.toThrow("Disallowed handler name '__proto__'");
+		await expect((room.emit as any)["toString"]({ text: "x" })).rejects.toThrow("Disallowed handler name 'toString'");
 
-		pair.stop();
+		pair.stop.cleanup();
 		pair.connection.close();
 	});
 
@@ -2164,10 +2291,46 @@ describe("room kit", () => {
 			userName: "Ada",
 		});
 
-		await expect((room.rpc as any)["__proto__"]()).rejects.toThrow("Unknown RPC '__proto__'");
-		await expect((room.rpc as any)["toString"]()).rejects.toThrow("Unknown RPC 'toString'");
+		await expect((room.rpc as any)["__proto__"]()).rejects.toThrow("Disallowed handler name '__proto__'");
+		await expect((room.rpc as any)["toString"]()).rejects.toThrow("Disallowed handler name 'toString'");
 
-		pair.stop();
+		pair.stop.cleanup();
+		pair.connection.close();
+	});
+
+	it("does not run initState before auth resolves", async () => {
+		const namespace = new MockNamespace();
+		const roomType = createRoomType("init-before-auth", "count");
+		let initCalls = 0;
+		const handlers: RoomServerHandlers<typeof roomType, { userId: string }> = {
+			onAuth: async () => {
+				throw new ClientSafeError("unauthorized");
+			},
+			initState: async () => {
+				initCalls += 1;
+				return {
+					roomKey: "shared-key",
+					created: "2026-03-23T00:00:00.000Z",
+					history: [],
+				};
+			},
+			admit: async () => {
+				throw new Error("should not reach admit");
+			},
+		};
+
+		const pair = createClientPair(namespace, "alice-socket", roomType, handlers);
+		await expect(
+			pair.client.join({
+				roomId: "room-1",
+				roomKey: "shared-key",
+				userId: "alice",
+				userName: "Ada",
+			}),
+		).rejects.toThrow("unauthorized");
+		expect(initCalls).toBe(0);
+
+		pair.stop.cleanup();
 		pair.connection.close();
 	});
 
@@ -2202,8 +2365,8 @@ describe("room kit", () => {
 
 		expect(adapterEvents).toContain("room-kit:presence");
 
-		alice.stop();
-		bob.stop();
+		alice.stop.cleanup();
+		bob.stop.cleanup();
 		alice.connection.close();
 		bob.connection.close();
 	});
@@ -2240,8 +2403,8 @@ describe("room kit", () => {
 			],
 		});
 
-		first.stop();
-		second.stop();
+		first.stop.cleanup();
+		second.stop.cleanup();
 		first.connection.close();
 		second.connection.close();
 	});
@@ -2283,9 +2446,9 @@ describe("room kit", () => {
 		expect(seenRoom1).toEqual([]);
 		expect(seenRoom2).toEqual(["hello-room-2"]);
 
-		alice.stop();
-		bob.stop();
-		carol.stop();
+		alice.stop.cleanup();
+		bob.stop.cleanup();
+		carol.stop.cleanup();
 		alice.connection.close();
 		bob.connection.close();
 		carol.connection.close();
@@ -2361,8 +2524,8 @@ describe("room kit", () => {
 		expect(seen).toEqual(["before"]);
 		expect(joinCalls.get("alice")).toBe(2);
 
-		alice.stop();
-		bob.stop();
+		alice.stop.cleanup();
+		bob.stop.cleanup();
 		alice.connection.close();
 		bob.connection.close();
 	});
@@ -2395,7 +2558,7 @@ describe("room kit", () => {
 		expect(states).toEqual(["connected", "reconnecting", "disconnected"]);
 
 		unsubscribe();
-		pair.stop();
+		pair.stop.cleanup();
 		pair.connection.close();
 	});
 });
