@@ -4,6 +4,8 @@
   "description": "Type-safe room membership, presence, and realtime messaging for Socket.IO.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "module": "dist/index.js",
+  "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run"
@@ -30,9 +32,7 @@
     "url": "https://github.com/only-cliches/room-kit/issues"
   },
   "homepage": "https://github.com/only-cliches/room-kit#readme",
-  "dependencies": {
-    
-  },
+  "dependencies": {},
   "devDependencies": {
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",

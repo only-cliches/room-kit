@@ -14,13 +14,6 @@ Small and type-safe room membership, presence, and realtime messaging for Socket
 npm install room-kit socket.io socket.io-client
 ```
 
-## Core API
-
-- `defineRoomType<TSchema>({ name, presence? })`
-- `serveRoomType(socket, roomType, handlers, adapter?)`
-- `createRoomClient(socket, roomType)`
-- `ClientSafeError`
-
 ## Quick Start
 
 ```ts
