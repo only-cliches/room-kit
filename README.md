@@ -27,6 +27,7 @@ npm install room-kit socket.io socket.io-client
 // common.ts
 import { defineRoomType } from "room-kit";
 
+// Shared room schema used by both server and client.
 type ChatMessage = {
   id: string;
   name: string;
@@ -34,29 +35,36 @@ type ChatMessage = {
   sentAt: string;
 };
 
+// The generic schema below drives the inferred server and client typing.
 export const chatRoom = defineRoomType<{
+  // Data required from the client to join a room.
   joinRequest: {
     roomId: string;
     roomKey: string;
     userName: string;
   };
+  // Per-member metadata stored by the server.
   memberProfile: {
     userId: string;
     userName: string;
   };
+  // Per-room metadata exposed to every joined client.
   roomProfile: {
     roomId: string;
     created: string;
   };
+  // Private mutable state that only lives on the server.
   serverState: {
     roomKey: string;
     created: string;
     history: ChatMessage[];
   };
+  // Named events the server can emit to room members.
   events: {
     message: ChatMessage;
     systemNotice: { text: string; sentAt: string };
   };
+  // Typed request/response calls for validated mutations.
   rpc: {
     sendMessage: (input: { text: string }): Promise<{ id: string }>;
   };
@@ -75,6 +83,7 @@ const httpServer = http.createServer();
 const io = new Server(httpServer);
 
 io.on("connection", (socket) => {
+  // Attach room behavior to each socket connection.
   serveRoomType<typeof chatRoom, { userId: string }>(socket, chatRoom, {
     onAuth: async () => {
       // Replace with real session/JWT validation.
@@ -97,10 +106,12 @@ io.on("connection", (socket) => {
       return {
         roomId: join.roomId,
         memberId: ctx.auth.userId,
+        // This profile is returned to the joining member and stored server-side.
         memberProfile: {
           userId: ctx.auth.userId,
           userName: join.userName,
         },
+        // Room metadata available to all joined members.
         roomProfile: {
           roomId: join.roomId,
           created: ctx.serverState.created,
@@ -115,6 +126,7 @@ io.on("connection", (socket) => {
     rpc: {
       sendMessage: async ({ text }, ctx) => {
         // Prefer RPC for validated state-changing operations.
+        // Build the canonical message once, then persist and broadcast it.
         const message = {
           id: randomUUID(),
           name: ctx.memberProfile.userName,
@@ -138,15 +150,18 @@ import { io } from "socket.io-client";
 import { createRoomClient } from "room-kit";
 import { chatRoom } from "./common";
 
+// Create the socket transport and bind the typed room client to it.
 const socket = io("http://127.0.0.1:3000");
 const chatClient = createRoomClient(socket, chatRoom);
 
+// Join returns a typed room handle with events, RPC, and leave().
 const joined = await chatClient.join({
   roomId: "team-alpha",
   roomKey: "secret",
   userName: "Ada",
 });
 
+// Event payload and metadata are both inferred from the room schema.
 joined.on.message((payload, meta) => {
   // meta.source.kind is "server" or "member".
   console.log(payload.text, meta.source.kind);
@@ -154,54 +169,61 @@ joined.on.message((payload, meta) => {
 
 // Fully typed request/response based on your room definition.
 await joined.rpc.sendMessage({ text: "hello" });
+// Cleanly leave the room when you're done.
 await joined.leave();
 ```
 
 ## Room Schema
 
-`defineRoomType<TSchema>()` is type-first. The schema keys are:
+`defineRoomType<TSchema>(options)` takes a runtime options object. `TSchema` controls the inferred API surface:
 
-- `joinRequest`: data required to join; must include `roomId`.
-- `memberProfile`: server-tracked member metadata.
-- `roomProfile`: room metadata returned to each joined client; must include `roomId`.
-- `serverState`: private mutable server state per room instance.
-- `events`: named room events.
-- `rpc`: named RPC methods.
+- `joinRequest`: payload the client must send to join a room; it must include `roomId`.
+- `memberProfile`: per-member metadata stored by the server and exposed in membership snapshots.
+- `roomProfile`: per-room metadata returned on join and reused in server context; it must include `roomId`.
+- `serverState`: private mutable state owned by the server for each room instance.
+- `events`: named room events the server may emit and, if declared in handlers, accept from clients.
+- `rpc`: named request/response methods exposed to joined clients.
 
 Runtime presence mode is configured in the `defineRoomType` options:
 
 - `"none"`: no presence query support.
 - `"count"`: only count support.
 - `"list"`: count + paginated members.
+- default: `"list"` when `presence` is omitted.
 
 ## Server Handlers
 
 `serveRoomType(socket, roomType, handlers, adapter?)` accepts:
 
 - `onAuth(socket)`: optional unless you type a non-`unknown` auth context.
-- `onConnect(socket, auth)`: optional transport-connect hook (runs once per socket handler attach).
-- `revalidateAuth(socket, auth)`: optional per-request auth validation/rotation hook.
-- `initState(joinRequest)`: initialize room server state on first join.
-- `admit(joinRequest, ctx)`: required gate; returns `roomId`, `memberId`, `memberProfile`, `roomProfile`.
-- `onJoin(memberProfile, ctx)` / `onLeave(memberProfile, ctx)`: room membership lifecycle hooks (`onLeave` also runs on socket disconnect for joined rooms).
+- `onConnect(socket, auth)`: optional transport-connect hook attempted once when the socket handler is attached (after auth resolution).
+- `revalidateAuth(socket, auth)`: optional per-request auth validation hook; return `{ kind: "ok", auth? }` to continue or `{ kind: "reject" }` to deny.
+- `initState(joinRequest)`: initializes room server state on first join for a given room instance.
+- `admit(joinRequest, ctx)`: required admission gate; returns `roomId`, `memberId`, `memberProfile`, and `roomProfile`.
+- `onJoin(memberProfile, ctx)`: called after a successful join.
+- `onLeave(memberProfile, ctx)`: called on leave and during socket disconnect cleanup for joined rooms when auth is available for cleanup.
 - `onDisconnect(socket, auth)`: optional transport-disconnect hook.
-- `events`: handlers for client-emitted events.
+- `presencePolicy(ctx)`: optional server-side override for presence queries; the returned policy is clamped by the room's configured presence mode.
+- `events`: handlers for client-emitted events. Leave a key out to deny that client event.
 - `rpc`: handlers for client RPC calls.
 
 Server context (`ctx`) includes:
 
-- `ctx.auth`, `ctx.memberId`, `ctx.memberProfile`
+- `ctx.name`, `ctx.roomId`, `ctx.auth`, `ctx.memberId`, `ctx.memberProfile`
 - `ctx.roomProfile`, `ctx.serverState`
-- `ctx.emit.<event>(payload)` to emit to current room
-- `ctx.broadcast.emit.<event>(payload)` to emit across namespace
-- `ctx.broadcast.toRoom(roomId).emit.<event>(payload)`
-- `ctx.broadcast.toMembers(memberIds).emit.<event>(payload)`
+- `ctx.emit.<event>(payload)` to emit to the current room
+- `ctx.broadcast.emit.<event>(payload)` to emit across the namespace
+- `ctx.broadcast.toRoom(roomId).emit.<event>(payload)` to target a room
+- `ctx.broadcast.toMembers(memberIds).emit.<event>(payload)` to target specific members
 - `ctx.getPresence()`, `ctx.getPresenceCount()`, `ctx.listPresenceMembers({ offset, limit })`
 
 `serveRoomType` returns a handle:
 
 - `stop()` unregisters listeners for that socket
-- `stop.rooms()`, `stop.room(roomId)`, `stop.count(roomId)`, `stop.members(roomId, query)` for introspection
+- `stop.rooms()` returns snapshots for all rooms on the namespace
+- `stop.room(roomId)` returns one room snapshot or `undefined`
+- `stop.count(roomId)` returns the current member count for a room (`0` when the room does not exist; throws when room presence mode is `"none"`)
+- `stop.members(roomId, query)` returns a paginated presence listing (`{ count: 0, offset: 0, limit: 0, members: [] }` when the room does not exist; throws when room presence mode is not `"list"`)
 
 ## Client API
 
@@ -209,21 +231,17 @@ Server context (`ctx`) includes:
 
 - `client.name`
 - `client.connection.current` (`"connecting" | "connected" | "reconnecting" | "disconnected"`)
-- `client.connection.onChange(handler)`
-- `client.join(joinRequest) -> joinedRoom`
+- `client.connection.onChange(handler)` subscribes to transport-state changes and returns an unsubscribe function.
+- `client.join(joinRequest)` resolves to a `joinedRoom` handle.
 
 `joinedRoom` includes:
 
-- `joinedRoom.roomId`, `joinedRoom.memberId`, `joinedRoom.roomProfile`
-- `joinedRoom.rpc.<name>(...args)`
-- `joinedRoom.emit.<event>(payload)` (must match a declared server `events` handler)
-- `joinedRoom.on.<event>((payload, meta) => {})`
-- `joinedRoom.leave()`
-- `joinedRoom.presence` only when presence is enabled by room definition:
-- `presence.current`
-- `presence.onChange(handler)`
-- `presence.count()`
-- `presence.list({ offset, limit })` only for `"list"` presence
+- `joinedRoom.name`, `joinedRoom.roomId`, `joinedRoom.memberId`, `joinedRoom.roomProfile`
+- `joinedRoom.rpc.<name>(...args)` for typed RPC calls
+- `joinedRoom.emit.<event>(payload)` for client-emitted room events
+- `joinedRoom.on.<event>((payload, meta) => {})` for room event subscriptions
+- `joinedRoom.leave()` to leave the room and unregister the joined-room handle
+- `joinedRoom.presence` is part of the typed API when room presence mode is `"count"` or `"list"`; it exposes `current`, `onChange(handler)`, `count()`, and `list({ offset, limit })` when presence mode is `"list"`.
 
 ## Errors and Security
 
