@@ -254,6 +254,7 @@ export function serveRoomType<TRoom extends RoomDefinition<any>, TAuth = unknown
             const admission = await resolveAdmission(
                 socket,
                 handlers,
+                requestedRoomId,
                 frame.payload as JoinRequest<TRoom>,
                 provisional,
             );
@@ -700,13 +701,14 @@ async function resolveSocketAuth<TAuth>(
 async function resolveAdmission<TRoom extends RoomDefinition<any>, TAuth>(
     socket: ServerSocketLike,
     handlers: RoomServerHandlers<TRoom, TAuth>,
+    joinRoomId: string,
     join: JoinRequest<TRoom>,
     ctx: RoomServerContext<TRoom, TAuth>,
 ): Promise<ServerAdmission<TRoom>> {
     const admission = handlers.admit ? await Promise.resolve(handlers.admit(join, ctx)) : {};
-    const roomId = admission.roomId ?? join.roomId;
+    const roomId = admission.roomId ?? joinRoomId;
     const roomProfile = admission.roomProfile ?? ({ roomId } as RoomProfileFor<TRoom>);
-    assertMatchingRoomIds(join.roomId, roomId, (roomProfile as { roomId: string }).roomId);
+    assertMatchingRoomIds(joinRoomId, roomId, (roomProfile as { roomId: string }).roomId);
 
     return {
         roomId,
