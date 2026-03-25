@@ -381,7 +381,12 @@ export type EventListenApi<TRoom extends RoomDefinition<any>> = {
 };
 
 /**
- * Successful admission payload returned by `handlers.admit`.
+ * Successful admission payload used by the runtime after admission is
+ * normalized.
+ *
+ * The server persists these values as the membership record for the socket.
+ * `roomId`, `memberId`, `memberProfile`, and `roomProfile` must all be
+ * present in the finalized admission record.
  */
 export type ServerAdmission<TRoom extends RoomDefinition<any>> = {
     roomId: string;
@@ -389,6 +394,24 @@ export type ServerAdmission<TRoom extends RoomDefinition<any>> = {
     memberProfile: MemberProfileFor<TRoom>;
     roomProfile: RoomProfileFor<TRoom>;
 };
+
+/**
+ * Partial admission payload accepted from `handlers.admit`.
+ *
+ * Handlers may return only the fields they want to override. The runtime fills
+ * missing values with:
+ *
+ * - `roomId`: the join request room id
+ * - `memberId`: the connected socket id
+ * - `memberProfile`: an empty object
+ * - `roomProfile`: an object with the resolved `roomId`
+ *
+ * The runtime still validates that any supplied `roomId` matches the join
+ * request and that any supplied `roomProfile.roomId` matches the resolved room
+ * id.
+ *
+ */
+export type ServerAdmissionInput<TRoom extends RoomDefinition<any>> = Partial<ServerAdmission<TRoom>>;
 
 /**
  * Optional decision result returned by `revalidateAuth`.
@@ -407,10 +430,6 @@ export type AuthRevalidationDecision<TAuth> =
         message?: string;
     };
 
-type IsUnknown<T> = unknown extends T
-    ? ([T] extends [unknown] ? true : false)
-    : false;
-
 type RoomServerHandlersCommon<TRoom extends RoomDefinition<any>, TAuth> = {
     initState?(join: JoinRequest<TRoom>): Promise<ServerStateFor<TRoom>> | ServerStateFor<TRoom>;
     /**
@@ -428,7 +447,13 @@ type RoomServerHandlersCommon<TRoom extends RoomDefinition<any>, TAuth> = {
      * `{ kind: "reject", message }` to reject the operation.
      */
     revalidateAuth?(socket: ServerSocketLike, auth: TAuth): Promise<AuthRevalidationDecision<TAuth> | void> | AuthRevalidationDecision<TAuth> | void;
-    admit(join: JoinRequest<TRoom>, ctx: RoomServerContext<TRoom, TAuth>): Promise<ServerAdmission<TRoom>> | ServerAdmission<TRoom>;
+    /**
+     * Optional join admission hook.
+     *
+     * Return only the pieces you want to override. Missing fields are filled
+     * by the runtime.
+     */
+    admit?(join: JoinRequest<TRoom>, ctx: RoomServerContext<TRoom, TAuth>): Promise<ServerAdmissionInput<TRoom>> | ServerAdmissionInput<TRoom>;
     /**
      * Called once when a server socket disconnects.
      *
@@ -459,19 +484,21 @@ type RoomServerHandlersCommon<TRoom extends RoomDefinition<any>, TAuth> = {
 /**
  * Server handler contract for a room type.
  *
- * `onAuth` is required when `TAuth` is explicitly typed to a non-`unknown`
- * shape, and optional otherwise.
+ * `onAuth` and `admit` are both optional.
  *
- * Returning `false` rejects the socket before any room state is initialized.
+ * When `onAuth` is omitted, the socket is accepted with an `undefined` auth
+ * value. Returning `false` from `onAuth` still rejects the socket before room
+ * initialization.
+ *
+ * When `admit` is omitted, the runtime derives the admission record from the
+ * join request and socket id. When `admit` is present, it may return a partial
+ * admission and the server will fill in any missing fields as described by
+ * `ServerAdmissionInput`.
  */
 export type RoomServerHandlers<TRoom extends RoomDefinition<any>, TAuth = unknown> =
-    IsUnknown<TAuth> extends true
-        ? RoomServerHandlersCommon<TRoom, TAuth> & {
-            onAuth?(socket: ServerSocketLike): Promise<TAuth | false> | TAuth | false;
-        }
-        : RoomServerHandlersCommon<TRoom, TAuth> & {
-            onAuth(socket: ServerSocketLike): Promise<TAuth | false> | TAuth | false;
-        };
+    RoomServerHandlersCommon<TRoom, TAuth> & {
+        onAuth?(socket: ServerSocketLike): Promise<TAuth | false> | TAuth | false;
+    };
 
 /**
  * Context provided to server handlers (`admit`, `rpc`, `events`, join/leave).

@@ -29,6 +29,7 @@ export type {
     RoomServerHandlers,
     RoomSnapshot,
     ServerAdmission,
+    ServerAdmissionInput,
     ServerSocketLike,
     VisibleMemberFor,
 } from "./types";

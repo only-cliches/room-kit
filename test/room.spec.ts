@@ -875,6 +875,77 @@ describe("room kit", () => {
 		connection.close();
 	});
 
+	it("uses default auth and admission when handlers are omitted", async () => {
+		const namespace = new MockNamespace();
+		const roomType = createRoomType("default-server-config", "list");
+		const { client, connection, stop } = createClientPair(namespace, "alice-socket", roomType, {});
+
+		const joined = await client.join({
+			roomId: "room-1",
+			roomKey: "shared-key",
+			userId: "alice",
+			userName: "Ada",
+		});
+
+		expect(joined.memberId).toBe("alice-socket");
+		expect(joined.roomProfile).toMatchObject({
+			roomId: "room-1",
+		});
+		expect(stop.room("room-1")).toMatchObject({
+			roomId: "room-1",
+			members: [
+				{
+					memberId: "alice-socket",
+					memberProfile: {},
+				},
+			],
+		});
+
+		stop.cleanup();
+		connection.close();
+	});
+
+	it("fills in omitted admission fields", async () => {
+		const namespace = new MockNamespace();
+		const roomType = createRoomType("partial-admission", "list");
+		const handlers: RoomServerHandlers<typeof roomType> = {
+			admit: (join) => ({
+				memberProfile: {
+					userId: join.userId,
+					userName: join.userName,
+				},
+			}),
+		};
+		const { client, connection, stop } = createClientPair(namespace, "alice-socket", roomType, handlers);
+
+		const joined = await client.join({
+			roomId: "room-1",
+			roomKey: "shared-key",
+			userId: "alice",
+			userName: "Ada",
+		});
+
+		expect(joined.memberId).toBe("alice-socket");
+		expect(joined.roomProfile).toMatchObject({
+			roomId: "room-1",
+		});
+		expect(stop.room("room-1")).toMatchObject({
+			roomId: "room-1",
+			members: [
+				{
+					memberId: "alice-socket",
+					memberProfile: {
+						userId: "alice",
+						userName: "Ada",
+					},
+				},
+			],
+		});
+
+		stop.cleanup();
+		connection.close();
+	});
+
 	it("rejects when onAuth fails", async () => {
 		const namespace = new MockNamespace();
 		const roomType = createRoomType("reject-auth", "list");

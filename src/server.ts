@@ -3,6 +3,7 @@ import type {
     EventEmitApi,
     EventMetaFor,
     JoinRequest,
+    MemberProfileFor,
     PresenceFor,
     PresenceListQuery,
     PresencePageFor,
@@ -10,6 +11,7 @@ import type {
     RoomMemberSnapshot,
     RoomDefinition,
     RoomEvents,
+    RoomProfileFor,
     RoomServerAdapter,
     RoomServerBroadcastApi,
     RoomServerHandle,
@@ -18,6 +20,7 @@ import type {
     RoomSnapshot,
     ServerSocketLike,
     ServerStateFor,
+    ServerAdmission,
     PresenceValueFor,
     VisibleMemberFor,
 } from "./types";
@@ -178,6 +181,7 @@ type NamespaceState = {
 type AuthCacheEntry<TAuth> = {
     pending?: Promise<TAuth>;
     value?: TAuth;
+    hasValue?: boolean;
 };
 
 const namespaceStates = new WeakMap<object, NamespaceState>();
@@ -247,11 +251,11 @@ export function serveRoomType<TRoom extends RoomDefinition<any>, TAuth = unknown
                 roomProfile: undefined,
                 serverState: initialState,
             });
-            const admission = await handlers.admit(frame.payload as JoinRequest<TRoom>, provisional);
-            assertMatchingRoomIds(
-                requestedRoomId,
-                admission.roomId,
-                (admission.roomProfile as { roomId: string }).roomId,
+            const admission = await resolveAdmission(
+                socket,
+                handlers,
+                frame.payload as JoinRequest<TRoom>,
+                provisional,
             );
 
             const roomState: RoomState<TRoom> = roomCollection.get(admission.roomId) ?? {
@@ -650,7 +654,7 @@ async function resolveSocketAuth<TAuth>(
         return entry.pending;
     }
 
-    if (entry.value === undefined) {
+    if (!entry.hasValue) {
         const pending = Promise.resolve(handlers.onAuth?.(socket) as TAuth)
             .then((auth) => {
                 if (auth === false) {
@@ -660,6 +664,7 @@ async function resolveSocketAuth<TAuth>(
 
                 const current = authCache.get(socket) ?? {};
                 current.value = auth;
+                current.hasValue = true;
                 current.pending = undefined;
                 authCache.set(socket, current);
                 return auth;
@@ -690,6 +695,25 @@ async function resolveSocketAuth<TAuth>(
     }
 
     handleRejectedAuth(authCache, socket, decision);
+}
+
+async function resolveAdmission<TRoom extends RoomDefinition<any>, TAuth>(
+    socket: ServerSocketLike,
+    handlers: RoomServerHandlers<TRoom, TAuth>,
+    join: JoinRequest<TRoom>,
+    ctx: RoomServerContext<TRoom, TAuth>,
+): Promise<ServerAdmission<TRoom>> {
+    const admission = handlers.admit ? await Promise.resolve(handlers.admit(join, ctx)) : {};
+    const roomId = admission.roomId ?? join.roomId;
+    const roomProfile = admission.roomProfile ?? ({ roomId } as RoomProfileFor<TRoom>);
+    assertMatchingRoomIds(join.roomId, roomId, (roomProfile as { roomId: string }).roomId);
+
+    return {
+        roomId,
+        memberId: admission.memberId ?? socket.id,
+        memberProfile: admission.memberProfile ?? ({} as MemberProfileFor<TRoom>),
+        roomProfile,
+    };
 }
 
 function handleRejectedAuth<TAuth>(

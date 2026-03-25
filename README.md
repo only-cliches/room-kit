@@ -201,11 +201,12 @@ Runtime presence mode is configured in the `defineRoomType` options:
 
 `serveRoomType(socket, roomType, handlers, adapter?)` accepts:
 
-- `onAuth(socket)`: optional unless you type a non-`unknown` auth context. Return `false` to reject the socket before room initialization.
+- `onAuth(socket)`: optional. Return `false` to reject the socket before room initialization.
 - `onConnect(socket, auth)`: optional transport-connect hook attempted once when the socket handler is attached (after auth resolution).
 - `revalidateAuth(socket, auth)`: optional per-request auth validation hook; return `{ kind: "ok", auth? }` to continue or `{ kind: "reject" }` to deny.
 - `initState(joinRequest)`: initializes room server state on first join for a given room instance.
-- `admit(joinRequest, ctx)`: required admission gate; returns `roomId`, `memberId`, `memberProfile`, and `roomProfile`.
+- `admit(joinRequest, ctx)`: optional admission gate. Return only the fields you want to override. Missing `roomId`, `memberId`, `memberProfile`, and `roomProfile` values are filled in by the server.
+- `admit` is still validated: any returned `roomId` must match the join request room id, and any returned `roomProfile.roomId` must match the resolved room id.
 - `onJoin(memberProfile, ctx)`: called after a successful join.
 - `onLeave(memberProfile, ctx)`: called on leave and during socket disconnect cleanup for joined rooms when auth is available for cleanup.
 - `onDisconnect(socket, auth)`: optional transport-disconnect hook.
